@@ -1,0 +1,23 @@
+# Core RL Framework
+stable-baselines3
+gymnasium
+sb3-contrib
+
+# Data Processing
+pandas
+numpy
+yfinance
+stockstats
+
+# Visualization
+matplotlib
+plotly
+streamlit
+
+# Trading APIs (optional - only needed for paper trading)
+alpaca-py
+
+# Utilities
+python-dotenv
+pyyaml
+tqdm
