@@ -31,6 +31,7 @@ from src.autotest.strategy_analyzer import StrategyAnalyzer
 from src.autotest.strategy_database import StrategyDatabase
 from src.autotest.model_manager import ModelManager
 from src.autotest.model_lifecycle import ModelLifecycleManager, ModelState
+from src.agents.trainer import request_shutdown, reset_shutdown
 
 
 class AutoTestSystem:
@@ -72,6 +73,7 @@ class AutoTestSystem:
         """Handle shutdown signals gracefully"""
         print("\n\nReceived shutdown signal. Stopping AUTOTEST...")
         self.running = False
+        request_shutdown()  # Signal trainer to stop current training
         self.orchestrator.stop_all_trading()
     
     def is_scheduled_time(self) -> bool:
@@ -369,6 +371,7 @@ class AutoTestSystem:
         """Run only the training phase"""
         print("Running training phase only...")
         
+        reset_shutdown()  # Clear any previous shutdown flag
         num_models = self.config['training']['num_models_to_train']
         parameter_sets = self.param_generator.generate_balanced_sets(num_models)
         training_results = self.trainer.train_all_models(parameter_sets)
@@ -569,6 +572,7 @@ class AutoTestSystem:
     def _colosseum_training_cycle(self):
         """Run training cycle for colosseum mode with genetic evolution."""
         print("Starting daily training cycle...")
+        reset_shutdown()  # Clear any previous shutdown flag
         
         # Check how many models are already eligible for paper trading (in VALIDATION state)
         eligible_count = self.lifecycle_manager.get_validation_count()
@@ -605,7 +609,13 @@ class AutoTestSystem:
                 num_offspring = min(int(daily_limit * offspring_ratio), len(elite_parents))
                 print(f"\n[GENETIC] Found {len(elite_parents)} elite parents, spawning {num_offspring} offspring")
                 
+                from src.agents.trainer import is_shutdown_requested
                 for i, parent in enumerate(elite_parents[:num_offspring]):
+                    # Check shutdown before each offspring
+                    if is_shutdown_requested():
+                        print("\n\nShutdown requested - stopping offspring training...")
+                        break
+                    
                     print(f"  Parent {i+1}: {parent['model_id']} "
                           f"(fitness={parent['fitness_score']:.3f}, "
                           f"paper={parent['paper_return']*100:+.1f}%, "
@@ -633,12 +643,17 @@ class AutoTestSystem:
             else:
                 print("[GENETIC] No elite parents found yet - training fresh models only")
         
-        # Train fresh models (remaining slots)
-        num_fresh = daily_limit - num_offspring
-        print(f"\nTraining {num_fresh} fresh models + {num_offspring} offspring = {daily_limit} total")
-        
-        parameter_sets = self.param_generator.generate_balanced_sets(num_fresh)
-        training_results = self.trainer.train_all_models(parameter_sets)
+        # Train fresh models (remaining slots) - but check shutdown first
+        from src.agents.trainer import is_shutdown_requested
+        if is_shutdown_requested():
+            print("\n\nShutdown requested - skipping fresh model training...")
+            training_results = []
+        else:
+            num_fresh = daily_limit - num_offspring
+            print(f"\nTraining {num_fresh} fresh models + {num_offspring} offspring = {daily_limit} total")
+            
+            parameter_sets = self.param_generator.generate_balanced_sets(num_fresh)
+            training_results = self.trainer.train_all_models(parameter_sets)
         
         # Combine results
         all_results = offspring_results + training_results

@@ -3,9 +3,39 @@ import numpy as np
 from stable_baselines3 import PPO, A2C, DDPG, SAC
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from typing import Dict, Any
 import torch
+
+# Global shutdown flag - set by signal handlers
+_shutdown_requested = False
+
+def request_shutdown():
+    """Call this to request graceful shutdown of training"""
+    global _shutdown_requested
+    _shutdown_requested = True
+
+def reset_shutdown():
+    """Reset shutdown flag for new training session"""
+    global _shutdown_requested
+    _shutdown_requested = False
+
+def is_shutdown_requested():
+    """Check if shutdown was requested - use this instead of importing the variable"""
+    return _shutdown_requested
+
+
+class ShutdownCallback(BaseCallback):
+    """Callback that stops training when shutdown is requested"""
+    
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+    
+    def _on_step(self) -> bool:
+        if _shutdown_requested:
+            print("\nShutdown requested - stopping training gracefully...")
+            return False  # Returning False stops training
+        return True
 
 
 class RLTrainer:
@@ -110,6 +140,9 @@ class RLTrainer:
             total_timesteps = self.config['training']['total_timesteps']
         
         callbacks = []
+        
+        # Add shutdown callback first so it's checked on every step
+        callbacks.append(ShutdownCallback())
         
         checkpoint_dir = self.config['monitoring']['checkpoint_dir']
         os.makedirs(checkpoint_dir, exist_ok=True)

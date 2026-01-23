@@ -6,7 +6,7 @@ import yaml
 from typing import Dict, Any
 from datetime import datetime
 
-from src.agents.trainer import RLTrainer
+from src.agents.trainer import RLTrainer, is_shutdown_requested
 from src.environment.trading_env import StockTradingEnv
 from src.data.data_loader import DataLoader
 from src.data.feature_engineer import FeatureEngineer

@@ -27,3 +27,4 @@ alpaca-py
 python-dotenv
 pyyaml
 tqdm
+tensorboard

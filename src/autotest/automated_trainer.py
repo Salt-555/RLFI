@@ -10,6 +10,8 @@ import traceback
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from src.agents.trainer import is_shutdown_requested
+
 from src.data.data_loader import DataLoader
 from src.data.feature_engineer import FeatureEngineer
 from src.environment.trading_env import StockTradingEnv
@@ -53,6 +55,17 @@ class AutomatedTrainer:
         Returns:
             Dictionary with training results and model path
         """
+        # Check shutdown FIRST before doing anything
+        if is_shutdown_requested():
+            return {
+                'model_id': params['model_id'],
+                'params': params,
+                'success': False,
+                'error': 'Shutdown requested',
+                'model_path': None,
+                'training_time': 0
+            }
+        
         model_id = params['model_id']
         algorithm = params['algorithm']
         tickers = params['tickers']
@@ -183,6 +196,12 @@ class AutomatedTrainer:
             eval_env = DummyVecEnv([lambda: Monitor(val_env)])
             model = trainer.train(total_timesteps=params['timesteps'], eval_env=eval_env)
             
+            # Check if training was interrupted - don't save incomplete models
+            if is_shutdown_requested():
+                print(f"\n[{model_id}] Training interrupted - NOT saving incomplete model")
+                result['error'] = 'Training interrupted by shutdown'
+                return result
+            
             # Save model
             model_path = os.path.join(self.models_dir, f"{model_id}_{algorithm}.zip")
             trainer.save_model(model_path)
@@ -287,10 +306,20 @@ class AutomatedTrainer:
         failed = 0
         
         for i, params in enumerate(parameter_sets, 1):
+            # Check if shutdown was requested
+            if is_shutdown_requested():
+                print("\n\nShutdown requested - stopping training loop...")
+                break
+            
             print(f"\n\nProgress: {i}/{len(parameter_sets)}")
             
             result = self.train_model(params)
             results.append(result)
+            
+            # Check again after training - if shutdown was requested during training, stop now
+            if is_shutdown_requested():
+                print("\n\nShutdown requested - stopping training loop...")
+                break
             
             if result['success']:
                 successful += 1

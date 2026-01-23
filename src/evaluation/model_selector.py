@@ -260,14 +260,14 @@ class ModelSelector:
                 {
                     "model_id": e.model_id,
                     "model_path": e.model_path,
-                    "final_reward": e.final_reward,
-                    "best_reward": e.best_reward,
-                    "trend_score": e.trend_score,
-                    "consistency_score": e.consistency_score,
-                    "learning_score": e.learning_score,
-                    "passed_selection": e.passed_selection,
-                    "eval_rewards": e.eval_rewards,
-                    "eval_timesteps": e.eval_timesteps
+                    "final_reward": float(e.final_reward),
+                    "best_reward": float(e.best_reward),
+                    "trend_score": float(e.trend_score),
+                    "consistency_score": float(e.consistency_score),
+                    "learning_score": float(e.learning_score),
+                    "passed_selection": bool(e.passed_selection),
+                    "eval_rewards": [float(r) for r in e.eval_rewards],
+                    "eval_timesteps": [int(t) for t in e.eval_timesteps]
                 }
                 for e in self.evaluations
             ],
