@@ -354,9 +354,10 @@ def get_lifecycle_data():
             })
 
         cursor.execute('''
-            SELECT model_id, algorithm, tickers, run_date
-            FROM strategies
-            ORDER BY created_at DESC
+            SELECT s.model_id, s.algorithm, s.tickers, s.run_date
+            FROM strategies s
+            INNER JOIN model_lifecycle ml ON s.model_id = ml.model_id
+            ORDER BY s.created_at DESC
             LIMIT 10
         ''')
         recent_models = cursor.fetchall()
