@@ -18,6 +18,7 @@ stockstats
 matplotlib
 plotly
 streamlit
+seaborn
 
 # Trading APIs (optional - only needed for paper trading)
 alpaca-py
