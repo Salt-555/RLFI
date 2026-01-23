@@ -28,8 +28,21 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap');
     
-    * {
+    *:not(svg):not(path) {
         font-family: 'Share Tech Mono', 'Courier New', monospace !important;
+    }
+    
+    /* Fix expander icons - hide broken icon and use CSS arrow */
+    [data-testid="stExpander"] svg {
+        display: none !important;
+    }
+    [data-testid="stExpander"] summary > span:first-child::before {
+        content: "[+] " !important;
+        color: #ffaa00;
+        font-family: 'Share Tech Mono', monospace !important;
+    }
+    [data-testid="stExpander"][open] summary > span:first-child::before {
+        content: "[-] " !important;
     }
     
     /* Hide sidebar completely */
@@ -517,57 +530,76 @@ def get_trading_data():
 
 
 def get_all_models_with_lineage():
-    """Get all models and their parent relationships."""
+    """Get all models and their parent relationships from database only."""
     models = {}
     
-    dirs = ['autotest_models', 'models', 'champion_models']
-    
-    for dir_path in dirs:
-        if not os.path.exists(dir_path):
-            continue
-        
-        for filename in os.listdir(dir_path):
-            if filename.endswith('_metadata.yaml'):
-                filepath = os.path.join(dir_path, filename)
-                try:
-                    with open(filepath, 'r') as f:
-                        meta = yaml.safe_load(f)
-                    
-                    if meta and 'model_id' in meta:
-                        model_id = meta['model_id']
-                        models[model_id] = {
-                            'model_id': model_id,
-                            'parent_model_id': meta.get('parent_model_id'),
-                            'generation': meta.get('generation', 1),
-                            'algorithm': meta.get('algorithm'),
-                            'tickers': meta.get('tickers', []),
-                            'total_timesteps': meta.get('total_timesteps'),
-                        }
-                except:
-                    continue
-    
     db_path = 'autotest_strategies.db'
-    if os.path.exists(db_path):
-        try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT model_id, current_state, backtest_expected_sharpe FROM model_lifecycle')
-            for row in cursor.fetchall():
-                model_id, state, sharpe = row
-                if model_id in models:
-                    models[model_id]['state'] = state
-                    models[model_id]['sharpe'] = sharpe
-                else:
-                    models[model_id] = {
-                        'model_id': model_id,
-                        'parent_model_id': None,
-                        'generation': 1,
-                        'state': state,
-                        'sharpe': sharpe
-                    }
-            conn.close()
-        except:
-            pass
+    if not os.path.exists(db_path):
+        return models
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Get models from model_lifecycle table (these are the real models)
+        cursor.execute('''
+            SELECT ml.model_id, ml.current_state, ml.backtest_expected_sharpe, s.algorithm
+            FROM model_lifecycle ml
+            LEFT JOIN strategies s ON ml.model_id = s.model_id
+        ''')
+        
+        for row in cursor.fetchall():
+            model_id, state, sharpe, algorithm = row
+            
+            # Parse generation from model_id if it contains _g pattern
+            generation = 1
+            parent_id = None
+            if '_g' in model_id:
+                # Model ID format: parent_id_gN where N is generation
+                parts = model_id.rsplit('_g', 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    parent_id = parts[0]
+                    generation = int(parts[1])
+            
+            models[model_id] = {
+                'model_id': model_id,
+                'parent_model_id': parent_id,
+                'generation': generation,
+                'state': state,
+                'sharpe': sharpe,
+                'algorithm': algorithm
+            }
+        
+        conn.close()
+        
+        # Also try to load metadata from YAML files for additional lineage info
+        dirs = ['autotest_models', 'models', 'champion_models']
+        for dir_path in dirs:
+            if not os.path.exists(dir_path):
+                continue
+            
+            for filename in os.listdir(dir_path):
+                if filename.endswith('_metadata.yaml'):
+                    filepath = os.path.join(dir_path, filename)
+                    try:
+                        with open(filepath, 'r') as f:
+                            meta = yaml.safe_load(f)
+                        
+                        if meta and 'model_id' in meta:
+                            model_id = meta['model_id']
+                            # Only update if model exists in database
+                            if model_id in models:
+                                if meta.get('parent_model_id'):
+                                    models[model_id]['parent_model_id'] = meta['parent_model_id']
+                                if meta.get('generation'):
+                                    models[model_id]['generation'] = meta['generation']
+                                if meta.get('algorithm') and not models[model_id].get('algorithm'):
+                                    models[model_id]['algorithm'] = meta['algorithm']
+                    except:
+                        continue
+        
+    except Exception as e:
+        pass
     
     return models
 
