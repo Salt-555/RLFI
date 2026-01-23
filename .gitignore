@@ -50,6 +50,10 @@ venv.bak/
 # Models and Checkpoints - ignore entire folder
 models/
 checkpoints/
+autotest_models/
+autotest_logs/
+autotest_results/
+champion_models/
 *.ckpt
 
 # Data

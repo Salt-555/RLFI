@@ -1,3 +1,8 @@
+# PyTorch CPU-only (install first for smaller footprint)
+# For GPU support, replace with: pip install torch --index-url https://download.pytorch.org/whl/rocm6.3
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
 # Core RL Framework
 stable-baselines3
 gymnasium
