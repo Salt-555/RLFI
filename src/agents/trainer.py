@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from stable_baselines3 import PPO, A2C, DDPG
+from stable_baselines3 import PPO, A2C, DDPG, SAC
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
@@ -80,6 +80,22 @@ class RLTrainer:
                 gamma=algo_config.get('gamma', 0.99),
                 policy_kwargs={'net_arch': algo_config.get('policy_kwargs', {}).get('net_arch', [400, 300])}
             )
+        elif self.model_name == 'sac':
+            # SAC - Off-policy, sample efficient, good for continuous actions
+            self.model = SAC(
+                **common_params,
+                learning_rate=algo_config.get('learning_rate', 3e-4),
+                buffer_size=algo_config.get('buffer_size', 1000000),
+                learning_starts=algo_config.get('learning_starts', 1000),
+                batch_size=algo_config.get('batch_size', 256),
+                tau=algo_config.get('tau', 0.005),
+                gamma=algo_config.get('gamma', 0.99),
+                ent_coef=algo_config.get('ent_coef', 'auto'),  # Auto-tune entropy
+                target_entropy=algo_config.get('target_entropy', 'auto'),
+                train_freq=algo_config.get('train_freq', 1),
+                gradient_steps=algo_config.get('gradient_steps', 1),
+                policy_kwargs={'net_arch': algo_config.get('policy_kwargs', {}).get('net_arch', [256, 256])}
+            )
         else:
             raise ValueError(f"Unknown algorithm: {self.model_name}")
         
@@ -138,6 +154,8 @@ class RLTrainer:
             self.model = A2C.load(path, env=self.env)
         elif self.model_name == 'ddpg':
             self.model = DDPG.load(path, env=self.env)
+        elif self.model_name == 'sac':
+            self.model = SAC.load(path, env=self.env)
         
         print(f"Model loaded from {path}")
         return self.model

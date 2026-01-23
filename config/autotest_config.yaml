@@ -10,9 +10,10 @@ autotest:
     num_models_to_train: 20  # Total models (used only if training_strategy.yaml missing)
     base_timesteps: 1500000  # Default timesteps for new models
     
-    # Parameter variations for training - PPO ONLY
+    # Parameter variations for training - PPO and SAC
     algorithms:
-      - ppo  # Focus on PPO for consistent strategy comparison
+      - ppo  # 60% - Stable, diverse trading behavior
+      - sac  # 40% - Sample efficient, concentrated positions
     
     # Organized stock baskets by sector (round-robin selection for diversity)
     stock_baskets:
@@ -96,6 +97,29 @@ autotest:
       - [[256, 128], [256, 128]]      # Default balanced
       - [[512, 256], [512, 256]]      # Larger capacity
       - [[256, 256, 128], [256, 256, 128]]  # Deeper network
+    
+    # SAC-specific hyperparameters
+    sac_buffer_size_variations:
+      - 500000
+      - 1000000
+    
+    sac_batch_size_variations:
+      - 128
+      - 256
+      - 512
+    
+    sac_tau_variations:  # Soft update coefficient
+      - 0.005
+      - 0.01
+    
+    sac_train_freq_variations:
+      - 1
+      - 4
+    
+    # Algorithm selection weights (for random selection)
+    algorithm_weights:
+      ppo: 0.6   # 60% PPO models
+      sac: 0.4   # 40% SAC models
     
   backtesting:
     test_period_days: 90  # Days of historical data to backtest

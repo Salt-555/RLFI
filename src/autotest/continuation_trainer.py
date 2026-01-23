@@ -124,15 +124,24 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
         model_config = base_config.copy()
         algorithm = params.get('algorithm', 'ppo')
         
-        if algorithm in model_config['training']:
-            original_lr = params.get('learning_rate', model_config['training'][algorithm]['learning_rate'])
-            adjusted_lr = original_lr * lr_multiplier
-            model_config['training'][algorithm]['learning_rate'] = adjusted_lr
-            
-            print(f"[{new_model_id}] Adjusted learning rate: {original_lr} → {adjusted_lr}")
-            
-            # Apply other PPO parameters if present
+        # Ensure algorithm config section exists
+        if algorithm not in model_config['training']:
+            model_config['training'][algorithm] = {}
+        
+        original_lr = params.get('learning_rate', model_config['training'][algorithm].get('learning_rate', 3e-4))
+        adjusted_lr = original_lr * lr_multiplier
+        model_config['training'][algorithm]['learning_rate'] = adjusted_lr
+        
+        print(f"[{new_model_id}] Algorithm: {algorithm.upper()}")
+        print(f"[{new_model_id}] Adjusted learning rate: {original_lr} → {adjusted_lr}")
+        
+        # Apply algorithm-specific parameters
+        if algorithm == 'ppo':
             for param_key in ['n_steps', 'batch_size', 'gamma', 'clip_range', 'ent_coef']:
+                if param_key in params:
+                    model_config['training'][algorithm][param_key] = params[param_key]
+        elif algorithm == 'sac':
+            for param_key in ['buffer_size', 'batch_size', 'gamma', 'tau', 'train_freq', 'ent_coef']:
                 if param_key in params:
                     model_config['training'][algorithm][param_key] = params[param_key]
         

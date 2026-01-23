@@ -72,7 +72,7 @@ class ParameterGenerator:
         """
         Generate balanced parameter sets ensuring diversity across all dimensions.
         Uses round-robin basket selection for sector diversity.
-        Focuses on PPO-specific hyperparameters.
+        Supports both PPO and SAC algorithms with weighted selection.
         
         Args:
             num_sets: Number of parameter sets to generate
@@ -96,12 +96,22 @@ class ParameterGenerator:
         
         learning_rates = self.training_config['learning_rate_variations']
         
+        # Algorithm selection with weights
+        algorithms = self.training_config.get('algorithms', ['ppo'])
+        algorithm_weights = self.training_config.get('algorithm_weights', {'ppo': 1.0})
+        
         # PPO-specific hyperparameters
         n_steps_variations = self.training_config.get('n_steps_variations', [2048])
         batch_size_variations = self.training_config.get('batch_size_variations', [64])
         gamma_variations = self.training_config.get('gamma_variations', [0.99])
         clip_range_variations = self.training_config.get('clip_range_variations', [0.2])
         ent_coef_variations = self.training_config.get('ent_coef_variations', [0.01])
+        
+        # SAC-specific hyperparameters
+        sac_buffer_size_variations = self.training_config.get('sac_buffer_size_variations', [1000000])
+        sac_batch_size_variations = self.training_config.get('sac_batch_size_variations', [256])
+        sac_tau_variations = self.training_config.get('sac_tau_variations', [0.005])
+        sac_train_freq_variations = self.training_config.get('sac_train_freq_variations', [1])
         
         # Network architecture variations
         net_arch_variations = self.training_config.get('net_arch_variations', [[[256, 128], [256, 128]]])
@@ -135,28 +145,67 @@ class ParameterGenerator:
             # Select network architecture
             net_arch = random.choice(net_arch_variations)
             
+            # Select algorithm based on weights
+            algo = self._select_algorithm_weighted(algorithms, algorithm_weights)
+            
             model_id = f"{timestamp}_{i+1:03d}"
             
+            # Base parameters common to all algorithms
             params = {
                 'model_id': model_id,
-                'algorithm': 'ppo',  # PPO only
+                'algorithm': algo,
                 'tickers': tickers,
                 'basket_name': basket_name,
                 'tech_indicators': selected_indicators,
                 'learning_rate': random.choice(learning_rates),
                 'timesteps': self.training_config['base_timesteps'],
-                # PPO-specific parameters
-                'n_steps': random.choice(n_steps_variations),
-                'batch_size': random.choice(batch_size_variations),
                 'gamma': random.choice(gamma_variations),
-                'clip_range': random.choice(clip_range_variations),
-                'ent_coef': random.choice(ent_coef_variations),
                 'net_arch': net_arch
             }
-            params['name'] = f"ppo_{model_id}"
+            
+            # Algorithm-specific parameters
+            if algo == 'ppo':
+                params.update({
+                    'n_steps': random.choice(n_steps_variations),
+                    'batch_size': random.choice(batch_size_variations),
+                    'clip_range': random.choice(clip_range_variations),
+                    'ent_coef': random.choice(ent_coef_variations),
+                })
+            elif algo == 'sac':
+                params.update({
+                    'buffer_size': random.choice(sac_buffer_size_variations),
+                    'batch_size': random.choice(sac_batch_size_variations),
+                    'tau': random.choice(sac_tau_variations),
+                    'train_freq': random.choice(sac_train_freq_variations),
+                    'ent_coef': 'auto',  # SAC auto-tunes entropy
+                })
+            
+            params['name'] = f"{algo}_{model_id}"
             parameter_sets.append(params)
         
         return parameter_sets
+    
+    def _select_algorithm_weighted(self, algorithms: List[str], weights: Dict[str, float]) -> str:
+        """Select algorithm based on configured weights"""
+        # Build weighted list
+        algo_weights = []
+        for algo in algorithms:
+            weight = weights.get(algo, 1.0 / len(algorithms))
+            algo_weights.append((algo, weight))
+        
+        # Normalize weights
+        total_weight = sum(w for _, w in algo_weights)
+        normalized = [(a, w / total_weight) for a, w in algo_weights]
+        
+        # Random selection based on weights
+        r = random.random()
+        cumulative = 0
+        for algo, weight in normalized:
+            cumulative += weight
+            if r <= cumulative:
+                return algo
+        
+        return algorithms[0]  # Fallback
     
     def save_parameter_sets(self, parameter_sets: List[Dict[str, Any]], filepath: str):
         """Save parameter sets to a YAML file"""
