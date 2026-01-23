@@ -26,7 +26,7 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap');
     
-    * {
+    *:not([data-testid="collapsedControl"]):not([class*="icon"]):not(svg):not(path) {
         font-family: 'Share Tech Mono', 'Courier New', monospace !important;
     }
     
