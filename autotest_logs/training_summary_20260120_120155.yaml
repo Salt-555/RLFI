@@ -1,0 +1,408 @@
+failed: 15
+results:
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_001
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 64
+    clip_range: 0.2
+    ent_coef: 0.05
+    gamma: 0.95
+    initial_capital: 100000
+    learning_rate: 0.001
+    model_id: model_001
+    n_steps: 4096
+    name: ppo_model_001
+    reward_scaling: 1e-3
+    tickers: &id001
+    - JPM
+    - BAC
+    - WFC
+    - GS
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.466054
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_002
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 128
+    clip_range: 0.2
+    ent_coef: 0.01
+    gamma: 0.995
+    initial_capital: 100000
+    learning_rate: 0.0003
+    model_id: model_002
+    n_steps: 1024
+    name: ppo_model_002
+    reward_scaling: 1e-4
+    tickers: &id002
+    - SPY
+    - QQQ
+    - DIA
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.613527
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_003
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 128
+    clip_range: 0.3
+    ent_coef: 0.0
+    gamma: 0.99
+    initial_capital: 50000
+    learning_rate: 0.001
+    model_id: model_003
+    n_steps: 2048
+    name: ppo_model_003
+    reward_scaling: 1e-3
+    tickers: &id003
+    - MSFT
+    - AMZN
+    - META
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.46175
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_004
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 32
+    clip_range: 0.2
+    ent_coef: 0.0
+    gamma: 0.995
+    initial_capital: 100000
+    learning_rate: 0.0005
+    model_id: model_004
+    n_steps: 4096
+    name: ppo_model_004
+    reward_scaling: 1e-5
+    tickers:
+    - TSLA
+    - NVDA
+    - AMD
+    - INTC
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.465544
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_005
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 128
+    clip_range: 0.1
+    ent_coef: 0.01
+    gamma: 0.99
+    initial_capital: 100000
+    learning_rate: 0.0005
+    model_id: model_005
+    n_steps: 1024
+    name: ppo_model_005
+    reward_scaling: 1e-5
+    tickers: *id001
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.467804
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_006
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 64
+    clip_range: 0.3
+    ent_coef: 0.05
+    gamma: 0.95
+    initial_capital: 200000
+    learning_rate: 0.001
+    model_id: model_006
+    n_steps: 1024
+    name: ppo_model_006
+    reward_scaling: 1e-5
+    tickers: *id002
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.46606
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_007
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 32
+    clip_range: 0.1
+    ent_coef: 0.05
+    gamma: 0.99
+    initial_capital: 50000
+    learning_rate: 0.002
+    model_id: model_007
+    n_steps: 4096
+    name: ppo_model_007
+    reward_scaling: 1e-4
+    tickers: *id003
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.619568
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_008
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 64
+    clip_range: 0.1
+    ent_coef: 0.01
+    gamma: 0.99
+    initial_capital: 50000
+    learning_rate: 0.002
+    model_id: model_008
+    n_steps: 4096
+    name: ppo_model_008
+    reward_scaling: 1e-4
+    tickers: *id002
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.462277
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_009
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 32
+    clip_range: 0.3
+    ent_coef: 0.01
+    gamma: 0.95
+    initial_capital: 100000
+    learning_rate: 0.002
+    model_id: model_009
+    n_steps: 1024
+    name: ppo_model_009
+    reward_scaling: 1e-5
+    tickers:
+    - AAPL
+    - MSFT
+    - GOOGL
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.610772
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_010
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 32
+    clip_range: 0.3
+    ent_coef: 0.05
+    gamma: 0.995
+    initial_capital: 200000
+    learning_rate: 0.0005
+    model_id: model_010
+    n_steps: 4096
+    name: ppo_model_010
+    reward_scaling: 1e-4
+    tickers: &id005
+    - AAPL
+    - MSFT
+    - NVDA
+    - GOOGL
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.464729
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_011
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 128
+    clip_range: 0.1
+    ent_coef: 0.0
+    gamma: 0.99
+    initial_capital: 200000
+    learning_rate: 0.002
+    model_id: model_011
+    n_steps: 2048
+    name: ppo_model_011
+    reward_scaling: 1e-4
+    tickers: &id004
+    - AAPL
+    - NVDA
+    - TSLA
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.618223
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_012
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 64
+    clip_range: 0.2
+    ent_coef: 0.05
+    gamma: 0.995
+    initial_capital: 200000
+    learning_rate: 0.001
+    model_id: model_012
+    n_steps: 2048
+    name: ppo_model_012
+    reward_scaling: 1e-4
+    tickers:
+    - AAPL
+    - GOOGL
+    - AMZN
+    - MSFT
+    - NVDA
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.622743
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_013
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 32
+    clip_range: 0.3
+    ent_coef: 0.05
+    gamma: 0.95
+    initial_capital: 200000
+    learning_rate: 0.0003
+    model_id: model_013
+    n_steps: 1024
+    name: ppo_model_013
+    reward_scaling: 1e-3
+    tickers: *id004
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.467481
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_014
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 32
+    clip_range: 0.3
+    ent_coef: 0.05
+    gamma: 0.95
+    initial_capital: 200000
+    learning_rate: 0.002
+    model_id: model_014
+    n_steps: 2048
+    name: ppo_model_014
+    reward_scaling: 1e-5
+    tickers: *id002
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.467087
+- error: index 0 is out of bounds for axis 0 with size 0
+  model_id: model_015
+  model_path: null
+  params:
+    algorithm: ppo
+    batch_size: 64
+    clip_range: 0.1
+    ent_coef: 0.01
+    gamma: 0.995
+    initial_capital: 200000
+    learning_rate: 0.0001
+    model_id: model_015
+    n_steps: 2048
+    name: ppo_model_015
+    reward_scaling: 1e-4
+    tickers: *id005
+    timesteps: 1500000
+  success: false
+  traceback: "Traceback (most recent call last):\n  File \"/home/salt/CodingProjects/RLFI/src/autotest/automated_trainer.py\"\
+    , line 116, in train_model\n    train_env = StockTradingEnv(\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 54, in __init__\n    self.reset()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 78, in reset\n    state = self._get_state()\n  File \"/home/salt/CodingProjects/RLFI/src/environment/trading_env.py\"\
+    , line 157, in _get_state\n    state.extend(self.stock_prices / self.stock_prices[0])\n\
+    IndexError: index 0 is out of bounds for axis 0 with size 0\n"
+  training_time: 0.466464
+successful: 0
+total_models: 15

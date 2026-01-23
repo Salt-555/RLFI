@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "Starting RL Trading Bot Web UI"
+echo "Starting RLFI Colosseum Dashboard"
 echo "=========================================="
 
 # Activate virtual environment

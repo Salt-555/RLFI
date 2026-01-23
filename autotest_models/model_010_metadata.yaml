@@ -1,0 +1,34 @@
+algorithm: ppo
+indicator_stats_path: autotest_models/model_010_indicator_stats.json
+model_id: model_010
+model_path: autotest_models/model_010_ppo.zip
+parameters:
+  algorithm: ppo
+  batch_size: 128
+  clip_range: 0.1
+  ent_coef: 0.01
+  gamma: 0.995
+  learning_rate: 0.002
+  model_id: model_010
+  n_steps: 1024
+  name: ppo_model_010
+  net_arch:
+  - - 512
+    - 256
+  - - 512
+    - 256
+  tech_indicators: &id001
+  - cci_30
+  - adxr
+  - rsi_14
+  tickers: &id002
+  - AAPL
+  - GOOGL
+  - AMZN
+  - MSFT
+  - NVDA
+  timesteps: 1500000
+tech_indicators: *id001
+tickers: *id002
+training_date: '2026-01-20T16:49:40.487107'
+vecnormalize_path: autotest_models/model_010_ppo_vecnormalize.pkl

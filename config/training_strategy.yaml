@@ -1,0 +1,152 @@
+# Advanced Training Strategy Configuration
+# Implements hybrid exploration/exploitation with model retention
+
+training_strategy:
+  # Overall strategy
+  mode: "hybrid"  # Options: "exploration_only", "hybrid", "exploitation_heavy"
+  
+  # Phase 1: Exploration (New Models)
+  exploration:
+    enabled: true
+    num_models: 15  # Fresh models with varied parameters
+    timesteps: 1500000  # 1.5M timesteps each (up from 500k)
+    description: "Discover new strategies with varied parameters"
+  
+  # Phase 2: Exploitation (Continue Top Models)
+  exploitation:
+    enabled: true
+    num_models: 5  # Continue top performers from last week
+    source: "top_from_last_week"
+    base_timesteps_required: 500000  # Minimum training before continuation
+    additional_timesteps: 2000000  # 2M more timesteps
+    learning_rate_multiplier: 0.5  # Reduce LR for fine-tuning
+    description: "Refine proven strategies with more training"
+  
+  # Phase 3: Champions (Elite Models)
+  champions:
+    enabled: true
+    num_models: 1  # Best model across all weeks
+    source: "best_all_time"
+    base_timesteps_required: 2000000  # Minimum training before champion status
+    additional_timesteps: 3000000  # 3M more timesteps
+    learning_rate_multiplier: 0.3  # Very low LR to preserve knowledge
+    description: "Maintain and improve peak performers"
+  
+  # Model Retention Settings
+  retention:
+    enabled: true
+    archive_dir: "champion_models"
+    keep_top_n_per_week: 5
+    keep_champions: true
+    max_generations: 10  # Maximum lineage depth
+    versioning: true
+  
+  # Lineage Tracking
+  lineage:
+    enabled: true
+    track_parent: true
+    track_generation: true
+    track_total_timesteps: true
+    track_performance_history: true
+  
+  # Training Schedule
+  schedule:
+    # Option 1: All at once (requires 6-8 hours)
+    mode: "batch"  # or "distributed"
+    batch_duration_hours: 8
+    
+    # Option 2: Distributed throughout week
+    # distributed:
+    #   monday: ["exploration"]
+    #   tuesday: ["exploitation"]
+    #   wednesday: ["champions"]
+    #   thursday: ["backtesting"]
+    #   friday: ["analysis"]
+  
+  # Catastrophic Forgetting Prevention
+  forgetting_prevention:
+    enabled: true
+    mix_old_data: true
+    old_data_ratio: 0.3  # 30% old data, 70% new data
+    validation_check: true
+    rollback_threshold: 0.1  # Rollback if performance drops >10%
+  
+  # Market Adaptation
+  market_adaptation:
+    enabled: true
+    rolling_window_days: 365  # Train on last year of data
+    update_frequency: "weekly"
+    regime_detection: false  # Future feature
+  
+  # Compute Budget (Total ~35M timesteps/week)
+  compute_budget:
+    total_timesteps_target: 35000000
+    exploration_pct: 64  # 22.5M timesteps
+    exploitation_pct: 28  # 10M timesteps
+    champions_pct: 8     # 2.5M timesteps
+
+# Model Selection Criteria for Continuation
+continuation_criteria:
+  # Which models to continue training
+  selection_method: "ranking_score"  # or "sharpe_ratio", "total_return"
+  
+  # Minimum performance thresholds
+  min_sharpe_ratio: 0.5
+  min_total_return: 0.05  # 5%
+  max_drawdown: 0.30  # 30%
+  
+  # Diversity requirements
+  ensure_diversity: true
+  max_similar_models: 2  # Max 2 models with same tickers
+  
+  # Recency bias
+  prefer_recent: true
+  recent_weeks_weight: 1.5  # 1.5x weight for last 4 weeks
+
+# Champion Selection Criteria
+champion_criteria:
+  # Requirements for champion status
+  min_weeks_tested: 2
+  min_total_timesteps: 2000000
+  min_sharpe_ratio: 1.0
+  min_paper_trade_return: 0.08  # 8% in paper trading
+  
+  # Consistency requirements
+  max_variance: 0.2  # Low variance across backtests
+  min_win_rate: 0.55  # 55% win rate
+
+# Training Optimization
+optimization:
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 100000  # Stop if no improvement for 100k steps
+    min_delta: 0.01  # Minimum improvement threshold
+  
+  # Checkpointing
+  checkpointing:
+    enabled: true
+    frequency: 250000  # Save every 250k timesteps
+    keep_best_n: 3
+  
+  # Learning rate schedules
+  lr_schedules:
+    new_models: "linear"  # Linear decay
+    continued_models: "constant"  # Keep constant
+    champions: "constant"  # Keep constant
+  
+  # Monitoring
+  monitoring:
+    log_frequency: 10000  # Log every 10k steps
+    eval_frequency: 50000  # Evaluate every 50k steps
+    tensorboard: true
+
+# Fallback Strategy
+fallback:
+  # If no models meet continuation criteria
+  fallback_to_exploration: true
+  min_exploration_models: 10
+  
+  # If champion underperforms
+  demote_champion_threshold: -0.15  # -15% return
+  promote_new_champion: true

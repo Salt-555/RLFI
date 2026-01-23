@@ -5,12 +5,21 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from dotenv import load_dotenv
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import pandas as pd
+import yfinance as yf
+from src.inference.state_builder import StateBuilder, IndicatorCalculator
 
 
 class PaperTrader:
-    def __init__(self, model, config: Dict[str, Any], api_key: str = None, secret_key: str = None):
+    def __init__(
+        self, 
+        model, 
+        config: Dict[str, Any], 
+        api_key: str = None, 
+        secret_key: str = None,
+        indicator_stats: Optional[Dict] = None
+    ):
         load_dotenv()
         
         self.model = model
@@ -25,9 +34,32 @@ class PaperTrader:
         self.client = TradingClient(self.api_key, self.secret_key, paper=True)
         
         self.tickers = config['data']['tickers']
+        self.tech_indicators = config['features']['technical_indicators']
         self.check_interval = config['paper_trading'].get('check_interval', 300)
-        self.max_position_size = config['paper_trading'].get('max_position_size', 0.1)
+        self.max_position_size = config['environment'].get('max_position_pct', 0.3)
         self.stop_loss_pct = config['paper_trading'].get('stop_loss_pct', 0.02)
+        
+        # Initialize state builder for consistent state construction
+        self.state_builder = StateBuilder(
+            tickers=self.tickers,
+            tech_indicators=self.tech_indicators,
+            initial_amount=config['environment']['initial_amount']
+        )
+        
+        # Set indicator statistics if provided (from training data)
+        if indicator_stats:
+            self.state_builder.set_indicator_stats(
+                means=indicator_stats.get('means', {}),
+                stds=indicator_stats.get('stds', {})
+            )
+        
+        # Initialize indicator calculator
+        self.indicator_calculator = IndicatorCalculator(self.tech_indicators)
+        
+        # Cache for historical data (refreshed periodically)
+        self.historical_data_cache = {}
+        self.cache_refresh_interval = 3600  # Refresh every hour
+        self.last_cache_refresh = 0
         
         self.trade_log = []
         
@@ -198,21 +230,60 @@ class PaperTrader:
         print("\nPaper trading session complete")
         self.print_summary()
     
+    def _refresh_historical_cache(self):
+        """Refresh historical data cache for indicator calculation."""
+        current_time = time.time()
+        if current_time - self.last_cache_refresh < self.cache_refresh_interval:
+            return  # Cache still fresh
+        
+        print("Refreshing historical data cache...")
+        for ticker in self.tickers:
+            try:
+                # Get 60 days of historical data for indicator calculation
+                df = yf.download(ticker, period='60d', progress=False)
+                if not df.empty:
+                    df = df.reset_index()
+                    df.columns = [col.lower() if isinstance(col, str) else col[0].lower() for col in df.columns]
+                    self.historical_data_cache[ticker] = df
+            except Exception as e:
+                print(f"Error fetching historical data for {ticker}: {e}")
+        
+        self.last_cache_refresh = current_time
+    
+    def _calculate_indicators(self, ticker: str, current_price: float) -> Dict[str, float]:
+        """Calculate technical indicators for a ticker using cached historical data."""
+        if ticker not in self.historical_data_cache:
+            return {ind: 0.0 for ind in self.tech_indicators}
+        
+        hist_df = self.historical_data_cache[ticker]
+        return self.indicator_calculator.calculate_from_bars(hist_df, current_price)
+    
     def _build_state(self, account_info: Dict, prices: Dict[str, float]) -> np.ndarray:
-        state = [account_info['cash'] / 100000]
+        """Build state vector matching training environment exactly."""
+        # Refresh historical data cache if needed
+        self._refresh_historical_cache()
         
-        for ticker in self.tickers:
-            state.append(prices.get(ticker, 0) / 100)
-        
+        # Get current positions
         positions = self.get_positions()
+        stocks_owned = {ticker: positions.get(ticker, {}).get('qty', 0) for ticker in self.tickers}
+        
+        # Calculate technical indicators for each ticker
+        tech_indicator_values = {}
         for ticker in self.tickers:
-            state.append(positions.get(ticker, {}).get('qty', 0))
+            current_price = prices.get(ticker, 0)
+            tech_indicator_values[ticker] = self._calculate_indicators(ticker, current_price)
         
-        state.extend([0] * (len(self.tickers) * len(self.config['features']['technical_indicators'])))
+        # Use StateBuilder for consistent state construction
+        state = self.state_builder.build_state(
+            cash=account_info['cash'],
+            portfolio_value=account_info['portfolio_value'],
+            stock_prices=prices,
+            stocks_owned=stocks_owned,
+            tech_indicator_values=tech_indicator_values,
+            turbulence=0.0  # Could calculate from market data if needed
+        )
         
-        state.append(0)
-        
-        return np.array(state, dtype=np.float32)
+        return state
     
     def print_summary(self):
         account_info = self.get_account_info()

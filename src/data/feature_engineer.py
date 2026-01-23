@@ -1,7 +1,9 @@
 import pandas as pd
 import numpy as np
 from stockstats import StockDataFrame as Sdf
-from typing import List
+from typing import List, Dict
+import json
+import os
 
 
 class FeatureEngineer:
@@ -18,9 +20,13 @@ class FeatureEngineer:
             tic_df = df[df['tic'] == tic].copy()
             tic_df = tic_df.reset_index(drop=True)
             
+            # Save date and tic columns before StockDataFrame processing
             date_col = tic_df['date'].copy()
+            tic_col = tic_df['tic'].copy()
             
-            stock = Sdf.retype(tic_df.copy())
+            # Remove date column before Sdf.retype to prevent corruption
+            tic_df_no_date = tic_df.drop('date', axis=1)
+            stock = Sdf.retype(tic_df_no_date)
             
             for indicator in self.tech_indicator_list:
                 try:
@@ -28,18 +34,28 @@ class FeatureEngineer:
                 except Exception as e:
                     print(f"Warning: Could not calculate {indicator} for {tic}: {e}")
             
-            tic_df = stock.copy()
-            tic_df['date'] = date_col
+            # Convert back to regular dataframe and restore date
+            tic_df = pd.DataFrame(stock)
+            tic_df.insert(0, 'date', date_col)
+            tic_df['tic'] = tic_col
             stock_dfs.append(tic_df)
         
         df = pd.concat(stock_dfs, ignore_index=True)
         df = df.sort_values(by=['date', 'tic']).reset_index(drop=True)
         
-        date_col = df['date']
-        df = df.drop('date', axis=1)
-        df = df.ffill().bfill()
-        df = df.fillna(0)
-        df.insert(0, 'date', date_col)
+        # Fill NaN values in technical indicators only (not date)
+        tech_cols = [col for col in df.columns if col not in ['date', 'tic', 'open', 'high', 'low', 'close', 'volume']]
+        df[tech_cols] = df[tech_cols].ffill().bfill().fillna(0)
+        
+        # Normalize technical indicators to roughly -1 to 1 range for better ML training
+        for col in tech_cols:
+            if col in df.columns:
+                col_std = df[col].std()
+                col_mean = df[col].mean()
+                if col_std > 0:
+                    df[col] = (df[col] - col_mean) / (col_std + 1e-8)
+                    # Clip extreme values
+                    df[col] = df[col].clip(-5, 5)
         
         return df
     
@@ -104,3 +120,41 @@ class FeatureEngineer:
         print(f"Columns: {df.columns.tolist()}")
         
         return df
+    
+    def get_indicator_stats(self, df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+        """
+        Get mean and std for each technical indicator from the processed data.
+        These stats are needed for consistent normalization during inference.
+        
+        Args:
+            df: Processed DataFrame with technical indicators
+        
+        Returns:
+            Dict with 'means' and 'stds' for each indicator
+        """
+        tech_cols = [col for col in df.columns if col not in ['date', 'tic', 'open', 'high', 'low', 'close', 'volume', 'turbulence']]
+        
+        means = {}
+        stds = {}
+        
+        for col in tech_cols:
+            if col in df.columns:
+                # Get stats before normalization (raw values)
+                # Note: If already normalized, these will be ~0 and ~1
+                means[col] = float(df[col].mean())
+                stds[col] = float(df[col].std())
+        
+        return {'means': means, 'stds': stds}
+    
+    def save_indicator_stats(self, stats: Dict, filepath: str):
+        """Save indicator statistics to JSON file."""
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, 'w') as f:
+            json.dump(stats, f, indent=2)
+        print(f"Indicator stats saved to {filepath}")
+    
+    @staticmethod
+    def load_indicator_stats(filepath: str) -> Dict:
+        """Load indicator statistics from JSON file."""
+        with open(filepath, 'r') as f:
+            return json.load(f)

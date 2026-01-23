@@ -1,0 +1,23 @@
+[Unit]
+Description=RLFI - Reinforcement Learning Financial Intelligence Colosseum
+Documentation=https://github.com/salt/RLFI
+After=network.target
+
+[Service]
+Type=simple
+User=salt
+Group=salt
+WorkingDirectory=/home/salt/CodingProjects/RLFI
+Environment="PATH=/home/salt/CodingProjects/RLFI/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/salt/CodingProjects/RLFI/venv/bin/python3 /home/salt/CodingProjects/RLFI/scripts/autotest.py --colosseum
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:/home/salt/CodingProjects/RLFI/logs/rlfi.log
+StandardError=append:/home/salt/CodingProjects/RLFI/logs/rlfi.error.log
+
+# Resource limits (optional, adjust as needed)
+# MemoryMax=4G
+# CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

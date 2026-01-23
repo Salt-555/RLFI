@@ -80,7 +80,8 @@ def main():
     trainer = RLTrainer(train_env, config, model_name=algorithm)
     
     from stable_baselines3.common.vec_env import DummyVecEnv
-    eval_env = DummyVecEnv([lambda: val_env])
+    from stable_baselines3.common.monitor import Monitor
+    eval_env = DummyVecEnv([lambda: Monitor(val_env)])
     
     model = trainer.train(eval_env=eval_env)
     

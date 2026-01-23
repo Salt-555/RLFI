@@ -2,6 +2,7 @@ import os
 import numpy as np
 from stable_baselines3 import PPO, A2C, DDPG
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from typing import Dict, Any
 import torch
@@ -9,7 +10,14 @@ import torch
 
 class RLTrainer:
     def __init__(self, env, config: Dict[str, Any], model_name: str = 'ppo'):
-        self.env = DummyVecEnv([lambda: env])
+        # Wrap environment with Monitor before DummyVecEnv
+        # Note: We don't use VecNormalize here because normalization is handled in:
+        # 1. Feature engineering (z-score normalization of indicators)
+        # 2. Trading environment (_get_state normalizes all features)
+        # This simplifies inference and avoids sync issues with eval env
+        monitored_env = Monitor(env)
+        self.env = DummyVecEnv([lambda: monitored_env])
+        
         self.config = config
         self.model_name = model_name.lower()
         self.model = None
@@ -21,15 +29,16 @@ class RLTrainer:
         if 'net_arch' in policy_kwargs:
             net_arch = policy_kwargs['net_arch']
             if isinstance(net_arch, dict):
-                policy_kwargs['net_arch'] = [
-                    dict(pi=net_arch.get('pi', [256, 128]), 
-                         vf=net_arch.get('vf', [256, 128]))
-                ]
+                # SB3 v1.8.0+ format: dict(pi=..., vf=...) not [dict(...)]
+                policy_kwargs['net_arch'] = dict(
+                    pi=net_arch.get('pi', [256, 128]), 
+                    vf=net_arch.get('vf', [256, 128])
+                )
         
         common_params = {
             'policy': 'MlpPolicy',
             'env': self.env,
-            'verbose': 1,
+            'verbose': 0,
             'tensorboard_log': self.config['monitoring']['log_dir'],
             'device': 'cpu'
         }
@@ -99,6 +108,7 @@ class RLTrainer:
         if eval_env is not None:
             eval_callback = EvalCallback(
                 eval_env,
+                n_eval_episodes=5,  # Run 5 episodes per eval for proper variance
                 best_model_save_path=f"./models/{self.model_name}_best",
                 log_path=f"./logs/{self.model_name}_eval",
                 eval_freq=self.config['training'].get('eval_freq', 10000),
@@ -111,7 +121,7 @@ class RLTrainer:
         self.model.learn(
             total_timesteps=total_timesteps,
             callback=callbacks,
-            progress_bar=True
+            progress_bar=False
         )
         
         return self.model

@@ -1,0 +1,186 @@
+autotest:
+  enabled: true
+  schedule:
+    day_of_week: 6  # 0=Monday, 6=Sunday
+    start_hour: 2   # 2 AM
+    end_hour: 4     # 4 AM
+    timezone: "America/Denver"  # Salt Lake City (Mountain Time)
+  
+  training:
+    num_models_to_train: 20  # Total models (used only if training_strategy.yaml missing)
+    base_timesteps: 1500000  # Default timesteps for new models
+    
+    # Parameter variations for training - PPO ONLY
+    algorithms:
+      - ppo  # Focus on PPO for consistent strategy comparison
+    
+    # Organized stock baskets by sector (round-robin selection for diversity)
+    stock_baskets:
+      tech_mega:
+        name: "Tech Megacaps"
+        tickers: ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+      tech_semis:
+        name: "Semiconductors"
+        tickers: ["NVDA", "AMD", "INTC", "AVGO", "QCOM"]
+      tech_growth:
+        name: "Tech Growth"
+        tickers: ["TSLA", "NVDA", "AMD", "CRM", "NOW"]
+      financials:
+        name: "Financials"
+        tickers: ["JPM", "BAC", "WFC", "GS", "MS"]
+      etf_broad:
+        name: "Broad ETFs"
+        tickers: ["SPY", "QQQ", "DIA", "IWM", "VTI"]
+      etf_sector:
+        name: "Sector ETFs"
+        tickers: ["XLK", "XLF", "XLE", "XLV", "XLI"]
+      consumer:
+        name: "Consumer"
+        tickers: ["AMZN", "HD", "NKE", "SBUX", "MCD"]
+      healthcare:
+        name: "Healthcare"
+        tickers: ["JNJ", "UNH", "PFE", "ABBV", "MRK"]
+      # Counter-correlated / Hedging baskets
+      metals_equity_hedge:
+        name: "Metals vs S&P Hedge"
+        tickers: ["GLD", "SLV", "SPY", "GDX", "PPLT"]
+      commodities_mix:
+        name: "Commodities Mix"
+        tickers: ["GLD", "SLV", "USO", "UNG", "DBA"]
+      safe_haven:
+        name: "Safe Haven Assets"
+        tickers: ["GLD", "TLT", "VXX", "UUP", "SPY"]
+      risk_on_off:
+        name: "Risk On/Off"
+        tickers: ["SPY", "TLT", "GLD", "QQQ", "IEF"]
+      energy_hedge:
+        name: "Energy vs Market"
+        tickers: ["XLE", "USO", "SPY", "XOP", "VDE"]
+    
+    learning_rate_variations:
+      - 0.0001
+      - 0.0003
+      - 0.0005
+      - 0.001
+      - 0.002
+    
+    # PPO-specific hyperparameters
+    n_steps_variations:
+      - 1024
+      - 2048
+      - 4096
+    
+    batch_size_variations:
+      - 32
+      - 64
+      - 128
+    
+    gamma_variations:
+      - 0.95
+      - 0.99
+      - 0.995
+    
+    clip_range_variations:
+      - 0.1
+      - 0.2
+      - 0.3
+    
+    ent_coef_variations:
+      - 0.0
+      - 0.01
+      - 0.05
+    
+    # Network architecture variations (pi and vf networks)
+    net_arch_variations:
+      - [[128, 64], [128, 64]]        # Smaller, faster
+      - [[256, 128], [256, 128]]      # Default balanced
+      - [[512, 256], [512, 256]]      # Larger capacity
+      - [[256, 256, 128], [256, 256, 128]]  # Deeper network
+    
+  backtesting:
+    test_period_days: 90  # Days of historical data to backtest
+    metrics_to_evaluate:
+      - sharpe_ratio
+      - total_return
+      - max_drawdown
+      - win_rate
+      - sortino_ratio
+    
+    # Weights for ranking models (higher = more important)
+    ranking_weights:
+      sharpe_ratio: 0.35
+      total_return: 0.25
+      max_drawdown: 0.20  # Lower is better, will be inverted
+      win_rate: 0.10
+      sortino_ratio: 0.10
+    
+    top_n_models: 5  # Number of top models to paper trade
+  
+  paper_trading:
+    duration_hours: 6.5  # Trading hours (9:30 AM - 4:00 PM EST)
+    check_interval: 300  # Check every 5 minutes
+    initial_capital: 100000
+    max_position_size: 0.15
+    stop_loss_pct: 0.03
+  
+  # Colosseum - Continuous model lifecycle management
+  colosseum:
+    enabled: true
+    max_paper_trading_models: 10  # Maximum models in paper trading at once (Alpaca allows unlimited)
+    min_paper_trading_days: 20   # Minimum 4 weeks (20 trading days) before culling
+    cull_threshold_vs_backtest: 0.5  # Cull if return < 50% of backtest expectation
+    cull_loss_threshold: -0.05   # Cull if cumulative loss > 5%
+    promote_return_threshold: 0.05  # Promote if return > 5%
+    promote_sharpe_threshold: 0.5   # Promote if Sharpe > 0.5
+    promote_min_days: 40         # Minimum days before promotion eligible (8 weeks)
+    
+    # Backtest quality gate - models must pass to enter VALIDATION
+    backtest_quality_gate:
+      min_sharpe_ratio: 0.3      # Minimum Sharpe ratio to pass
+      min_total_return: 0.0      # Minimum return (0 = must be profitable)
+      max_drawdown: 0.25         # Maximum drawdown allowed (25%)
+    
+    # Schedule for continuous operation
+    daily_training_limit: 5      # Max models to train per day
+    training_hour: 2             # 2 AM (daily)
+    max_eligible_for_training: 5 # Skip training if 5+ models eligible for paper trading
+    culling_day: 5               # Saturday
+    culling_hour: 18             # 6 PM
+    
+    # Daily paper trading schedule (market hours)
+    market_open_hour: 7          # 7:30 AM Mountain = 9:30 AM Eastern
+    market_close_hour: 14        # 2:00 PM Mountain = 4:00 PM Eastern
+    
+    # Genetic evolution - spawn offspring from elite performers
+    genetic_training:
+      enabled: true
+      offspring_ratio: 0.4       # 40% offspring from elite parents, 60% fresh models
+      offspring_timesteps: 500000  # Additional training for offspring
+      offspring_lr_multiplier: 0.3  # Lower learning rate for fine-tuning
+      min_parent_trading_days: 15  # Parent must have 15+ days (3 weeks) of paper trading data
+    
+  storage:
+    models_dir: "autotest_models"
+    results_dir: "autotest_results"
+    logs_dir: "autotest_logs"
+    strategy_db: "autotest_strategies.db"  # SQLite database for strategy tracking
+    keep_history_days: 90  # Keep results for 90 days (3 months of weekly runs)
+  
+  strategy_tracking:
+    enabled: true
+    track_metrics:
+      - sharpe_ratio
+      - total_return
+      - max_drawdown
+      - win_rate
+      - sortino_ratio
+      - calmar_ratio
+      - volatility
+    compare_weeks: 12  # Compare against last 12 weeks
+    identify_patterns: true  # Analyze which parameter combinations work best
+    save_best_strategies: true  # Keep archive of best performing strategies
+  
+  notifications:
+    enabled: false
+    email: ""  # Add email for notifications
+    slack_webhook: ""  # Add Slack webhook URL

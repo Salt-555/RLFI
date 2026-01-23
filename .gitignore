@@ -47,11 +47,8 @@ venv.bak/
 *.env
 !.env.example
 
-# Models and Checkpoints
-models/*.zip
-models/*.pt
-models/*.pth
-models/*.h5
+# Models and Checkpoints - ignore entire folder
+models/
 checkpoints/
 *.ckpt
 

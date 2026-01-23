@@ -1,0 +1,33 @@
+algorithm: ppo
+indicator_stats_path: autotest_models/model_002_indicator_stats.json
+model_id: model_002
+model_path: autotest_models/model_002_ppo.zip
+parameters:
+  algorithm: ppo
+  batch_size: 128
+  clip_range: 0.3
+  ent_coef: 0.05
+  gamma: 0.99
+  learning_rate: 0.0003
+  model_id: model_002
+  n_steps: 4096
+  name: ppo_model_002
+  net_arch:
+  - - 256
+    - 128
+  - - 256
+    - 128
+  tech_indicators: &id001
+  - willr
+  - dx_14
+  - close_30_sma
+  tickers: &id002
+  - XLF
+  - XLK
+  - XLE
+  - XLV
+  timesteps: 1500000
+tech_indicators: *id001
+tickers: *id002
+training_date: '2026-01-20T15:04:37.792638'
+vecnormalize_path: autotest_models/model_002_ppo_vecnormalize.pkl
