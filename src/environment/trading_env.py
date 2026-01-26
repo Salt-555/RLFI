@@ -20,7 +20,8 @@ class StockTradingEnv(gym.Env):
         turbulence_threshold: float = 120,
         lookback_window: int = 1,
         day: int = 0,
-        max_position_pct: float = 0.1  # NEW: Max % of portfolio per position
+        max_position_pct: float = 0.1,  # NEW: Max % of portfolio per position
+        store_history_every: int = 100  # Store history every N steps (1 for backtesting)
     ):
         self.df = df
         self.stock_dim = stock_dim
@@ -33,6 +34,7 @@ class StockTradingEnv(gym.Env):
         self.turbulence_threshold = turbulence_threshold
         self.lookback_window = lookback_window
         self.day = day
+        self.store_history_every = store_history_every
         
         self.data = self._prepare_data()
         self.terminal = False
@@ -141,8 +143,8 @@ class StockTradingEnv(gym.Env):
         # Calculate multi-component reward
         reward = self._calculate_reward(portfolio_return, actions, begin_portfolio_value)
         
-        # Only store history every 100 steps to reduce memory overhead
-        if self.day % 100 == 0 or self.terminal:
+        # Store history at configured frequency (every N steps, or every step if N=1)
+        if self.day % self.store_history_every == 0 or self.terminal:
             self.asset_memory.append(self.portfolio_value)
             self.portfolio_return_memory.append(portfolio_return)
             self.actions_memory.append(actions)

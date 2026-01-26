@@ -125,7 +125,8 @@ class AutomatedBacktester:
                 reward_scaling=1.0,  # Not used with multi-component rewards
                 tech_indicator_list=tech_indicators,
                 turbulence_threshold=self.base_config['features']['turbulence_threshold'],
-                max_position_pct=self.base_config['environment'].get('max_position_pct', 0.3)
+                max_position_pct=self.base_config['environment'].get('max_position_pct', 0.3),
+                store_history_every=1  # Store every step for accurate backtest metrics
             )
             
             # Load model

@@ -48,7 +48,8 @@ def main():
         transaction_cost_pct=config['environment']['transaction_cost_pct'],
         reward_scaling=config['environment']['reward_scaling'],
         tech_indicator_list=config['features']['technical_indicators'],
-        turbulence_threshold=config['features']['turbulence_threshold']
+        turbulence_threshold=config['features']['turbulence_threshold'],
+        store_history_every=1  # Store every step for accurate backtest metrics
     )
     
     print("\n4. Loading trained model...")

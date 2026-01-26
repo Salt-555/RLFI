@@ -20,6 +20,9 @@ plotly
 streamlit
 seaborn
 
+# TUI
+textual
+
 # Trading APIs (optional - only needed for paper trading)
 alpaca-py
 
