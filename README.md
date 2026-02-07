@@ -210,7 +210,7 @@ The system is designed to run on CPU. GPU acceleration provides minimal benefit 
 
 ## License
 
-MIT License - See [LICENSE](LICENSE)
+O'Saasy License - See [LICENSE](LICENSE)
 
 ## Disclaimer
 
