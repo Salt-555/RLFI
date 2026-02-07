@@ -55,23 +55,21 @@ def main():
     train_env = StockTradingEnv(
         df=train_df,
         stock_dim=len(config['data']['tickers']),
-        hmax=config['environment']['hmax'],
         initial_amount=config['environment']['initial_amount'],
         transaction_cost_pct=config['environment']['transaction_cost_pct'],
-        reward_scaling=config['environment']['reward_scaling'],
         tech_indicator_list=config['features']['technical_indicators'],
-        turbulence_threshold=config['features']['turbulence_threshold']
+        turbulence_threshold=config['features']['turbulence_threshold'],
+        max_position_pct=config['environment'].get('max_position_pct', 0.3)
     )
     
     val_env = StockTradingEnv(
         df=val_df,
         stock_dim=len(config['data']['tickers']),
-        hmax=config['environment']['hmax'],
         initial_amount=config['environment']['initial_amount'],
         transaction_cost_pct=config['environment']['transaction_cost_pct'],
-        reward_scaling=config['environment']['reward_scaling'],
         tech_indicator_list=config['features']['technical_indicators'],
-        turbulence_threshold=config['features']['turbulence_threshold']
+        turbulence_threshold=config['features']['turbulence_threshold'],
+        max_position_pct=config['environment'].get('max_position_pct', 0.3)
     )
     
     algorithm = input("\nSelect algorithm (ppo/a2c/ddpg) [default: ppo]: ").strip().lower() or 'ppo'
