@@ -13,8 +13,16 @@ A continuous AI trading system that trains, validates, and paper trades reinforc
 - **Live Paper Trading**: Real-time trading via Alpaca API with rate limiting
 - **Sector-Based Baskets**: Diversified training across tech, financials, healthcare, ETFs, and hedging strategies
 - **Terminal UI**: Monitor model performance, positions, and system status via text-based interface
+- **Always-On Daemon**: Runs continuously via systemd, trains daily at 2 AM, manages lifecycle automatically
 
-## Quick Start
+## Requirements
+
+- Python 3.9+
+- ~2GB disk space (CPU-only PyTorch)
+- Alpaca account for paper trading (free)
+- Linux system with systemd (for daemon mode)
+
+## Quick Start (Daemon Mode - Recommended)
 
 ```bash
 # Clone and setup
@@ -23,21 +31,18 @@ cd RLFI
 chmod +x setup.sh
 ./setup.sh
 
-# Activate environment
-source venv/bin/activate
-
 # Configure API keys (required for paper trading)
+cp .env.example .env
 nano .env  # Add your Alpaca API keys
 
-# Start the Colosseum
-python scripts/autotest.py --mode colosseum
+# Install and start the daemon
+sudo cp rlfi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now rlfi.service
+
+# Monitor the system
+python tui.py  # Launch terminal UI
 ```
-
-## Requirements
-
-- Python 3.9+
-- ~2GB disk space (CPU-only PyTorch)
-- Alpaca account for paper trading (free)
 
 ## Installation Options
 
@@ -60,6 +65,35 @@ python3 -m venv venv
 ./venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
 ./venv/bin/pip install -r requirements.txt
 ```
+
+## Daemon Management
+
+The daemon runs continuously and handles all operations automatically:
+
+```bash
+# Check if daemon is running
+sudo systemctl status rlfi.service
+
+# View real-time logs
+sudo journalctl -u rlfi.service -f
+
+# Start/stop/restart the daemon
+sudo systemctl start rlfi.service
+sudo systemctl stop rlfi.service
+sudo systemctl restart rlfi.service
+
+# View recent logs (last 50 lines)
+sudo journalctl -u rlfi.service -n 50
+```
+
+### What the Daemon Does
+
+- **Training**: Trains 5 new models daily at 2 AM
+- **Validation**: Backtests models against quality gates (Sharpe > 0.3, Return > 0%, Drawdown < 25%)
+- **Paper Trading**: Promotes passing models to 20-40 day paper trading
+- **Weekly Culling**: Every Saturday at 6 PM, evaluates and promotes/culls models
+- **Genetic Evolution**: Champions spawn offspring with hyperparameter mutations
+- **Live Trading**: Manages real-time paper trading during market hours
 
 ## Configuration
 
@@ -91,41 +125,43 @@ Models train on sector-based baskets for diversity:
 - **ETFs**: SPY, QQQ, DIA, IWM, VTI
 - **Hedging**: GLD, TLT, VXX (counter-correlated)
 
-## Usage
+## Monitoring with TUI
 
-### Commands
+Launch the Terminal UI to monitor the daemon in real-time:
 
 ```bash
-# Continuous Colosseum (trains daily at 2 AM, trades during market hours)
-python scripts/autotest.py --mode colosseum
+# Launch TUI
+python tui.py
 
-# Train models only
+# Or use the launcher script
+./run_tui.sh
+```
+
+**TUI Features:**
+- **Dashboard**: Live daemon status, model counts, paper trading overview
+- **Models**: Browse all models with state, algorithm, Sharpe, and returns
+- **Lineage**: View family trees and genetic evolution
+- **Trading**: Paper trading history and performance
+
+**TUI Key Bindings:**
+- `1-4`: Switch between tabs (Dashboard, Models, Lineage, Trading)
+- `r`: Refresh data
+- `d`: Toggle daemon on/off
+- `q`: Quit
+
+## Manual Mode (Without Daemon)
+
+If you prefer not to use the systemd daemon, you can run modes manually:
+
+```bash
+# Train models only (one-time)
 python scripts/autotest.py --mode train
 
 # Backtest existing models
 python scripts/autotest.py --mode backtest
 
-# Launch TUI (Terminal UI)
-python tui.py
-# or
-./run_tui.sh
-```
-
-### Systemd Service (Linux)
-
-Run RLFI as a background service:
-
-```bash
-# Install service
-sudo cp rlfi.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now rlfi.service
-
-# Check status
-sudo systemctl status rlfi.service
-
-# View logs
-sudo journalctl -u rlfi.service -f
+# Run full colosseum cycle (continuous until Ctrl+C)
+python scripts/autotest.py --mode colosseum
 ```
 
 ## Model Lifecycle
@@ -179,15 +215,18 @@ RLFI/
 │   │   └── feature_engineer.py # Technical indicators
 │   ├── environment/
 │   │   └── trading_env.py      # Gymnasium trading environment
+│   ├── evaluation/
+│   │   └── backtester.py       # Backtesting engine
 │   └── trading/
 │       └── live_paper_trading.py
 ├── scripts/
 │   └── autotest.py             # Main entry point
 ├── tui.py                      # Terminal UI dashboard
 ├── run_tui.sh                  # Script to launch TUI
+├── rlfi.service                # Systemd service file
 ├── requirements.txt
 ├── setup.sh
-└── rlfi.service                # Systemd service file
+└── LICENSE                     # MIT License
 ```
 
 ## Environment Variables
@@ -208,12 +247,38 @@ Get free API keys at [alpaca.markets](https://alpaca.markets/)
 - **CPU Training**: ~30-60 min per model (1.5M timesteps)
 - **Memory**: ~2-4GB RAM per training model
 - **Disk**: ~50MB per saved model
+- **Daemon Resource Usage**: ~500MB RAM when idle, 2-4GB during training
 
 The system is designed to run on CPU. GPU acceleration provides minimal benefit for RL trading due to environment stepping being the bottleneck, not neural network computation.
 
+## Troubleshooting
+
+### Daemon won't start
+```bash
+# Check for Python path issues
+sudo systemctl status rlfi.service
+# View detailed logs
+sudo journalctl -u rlfi.service -n 100 --no-pager
+```
+
+### Database locked
+```bash
+# If the database gets corrupted, backup and reset
+mv autotest_strategies.db autotest_strategies.db.bak
+# Restart daemon - it will create a fresh database
+sudo systemctl restart rlfi.service
+```
+
+### Out of disk space
+```bash
+# Clean up old models
+python scripts/cleanup.py --dry-run  # See what would be deleted
+python scripts/cleanup.py             # Actually delete
+```
+
 ## License
 
-O'Saasy License - See [LICENSE](LICENSE)
+MIT License - See [LICENSE](LICENSE)
 
 ## Disclaimer
 
