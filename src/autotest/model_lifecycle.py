@@ -71,10 +71,18 @@ class ModelLifecycleManager:
                 model_path TEXT,
                 metadata_path TEXT,
                 tickers TEXT,
+                algorithm TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Add algorithm column if it doesn't exist (for existing databases)
+        try:
+            cursor.execute('ALTER TABLE model_lifecycle ADD COLUMN algorithm TEXT')
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
         
         # Daily paper trading performance log
         cursor.execute('''
@@ -111,11 +119,29 @@ class ModelLifecycleManager:
             )
         ''')
         
+        # Create indexes for performance optimization
+        # These are safe to run on existing databases (IF NOT EXISTS)
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_model_state ON model_lifecycle(current_state)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_model_lifecycle_model_id ON model_lifecycle(model_id)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_daily_log_model_date ON paper_trading_daily_log(model_id, trading_date)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_culling_model ON culling_decisions(model_id)
+        ''')
+        
         self.conn.commit()
     
     def register_model(self, model_id: str, model_path: str, metadata_path: str,
                        tickers: List[str], backtest_return: float = None,
-                       backtest_sharpe: float = None) -> bool:
+                       backtest_sharpe: float = None, algorithm: str = None) -> bool:
         """
         Register a new model entering the lifecycle.
         
@@ -126,6 +152,7 @@ class ModelLifecycleManager:
             tickers: List of tickers the model trades
             backtest_return: Expected return from backtesting
             backtest_sharpe: Expected Sharpe ratio from backtesting
+            algorithm: RL algorithm used (ppo, sac, a2c, ddpg)
         
         Returns:
             True if registered successfully
@@ -137,8 +164,8 @@ class ModelLifecycleManager:
                 INSERT INTO model_lifecycle (
                     model_id, current_state, state_entered_at,
                     backtest_expected_return, backtest_expected_sharpe,
-                    model_path, metadata_path, tickers
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    model_path, metadata_path, tickers, algorithm
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 model_id,
                 ModelState.TRAINING.value,
@@ -147,7 +174,8 @@ class ModelLifecycleManager:
                 backtest_sharpe,
                 model_path,
                 metadata_path,
-                json.dumps(tickers)
+                json.dumps(tickers),
+                algorithm
             ))
             self.conn.commit()
             return True
@@ -258,7 +286,7 @@ class ModelLifecycleManager:
         cursor.execute('''
             SELECT model_id, model_path, metadata_path, tickers,
                    paper_trading_started_at, backtest_expected_return,
-                   backtest_expected_sharpe
+                   backtest_expected_sharpe, algorithm
             FROM model_lifecycle
             WHERE current_state = ?
         ''', (ModelState.PAPER_TRADING.value,))
@@ -272,7 +300,8 @@ class ModelLifecycleManager:
                 'tickers': json.loads(row[3]) if row[3] else [],
                 'paper_trading_started_at': row[4],
                 'backtest_expected_return': row[5],
-                'backtest_expected_sharpe': row[6]
+                'backtest_expected_sharpe': row[6],
+                'algorithm': row[7] or 'ppo'
             })
         return models
     

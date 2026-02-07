@@ -690,7 +690,8 @@ class AutoTestSystem:
                 model_id=model_id,
                 model_path=result['model_path'],
                 metadata_path=result.get('metadata_path', ''),
-                tickers=result['params'].get('tickers', [])
+                tickers=result['params'].get('tickers', []),
+                algorithm=result['params'].get('algorithm', 'ppo')
             )
         
         # Backtest successful models
@@ -831,17 +832,9 @@ class AutoTestSystem:
             model_id = model_info['model_id']
             
             try:
-                # Detect algorithm from model path (e.g. "..._ppo.zip" or "..._sac.zip")
+                # Get algorithm from database (stored during registration)
+                algorithm = model_info.get('algorithm', 'ppo')
                 model_path = model_info['model_path']
-                algorithm = 'ppo'  # default
-                if model_path:
-                    model_filename = os.path.basename(model_path).lower()
-                    if '_sac.' in model_filename or model_filename.endswith('_sac.zip'):
-                        algorithm = 'sac'
-                    elif '_a2c.' in model_filename or model_filename.endswith('_a2c.zip'):
-                        algorithm = 'a2c'
-                    elif '_ddpg.' in model_filename or model_filename.endswith('_ddpg.zip'):
-                        algorithm = 'ddpg'
                 
                 # Setup model for trading
                 setup_result = self.orchestrator.setup_model_for_trading({
