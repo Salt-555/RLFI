@@ -29,9 +29,7 @@ features:
 environment:
   initial_amount: 100000
   transaction_cost_pct: 0.001
-  hmax: 100  # Deprecated - kept for backwards compatibility
   max_position_pct: 0.3  # Safety limit: max 30% of portfolio per position
-  reward_scaling: 1e-4
   state_space: null
   action_space: null
 

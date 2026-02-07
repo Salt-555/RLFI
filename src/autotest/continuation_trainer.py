@@ -35,14 +35,46 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
     tickers = model_spec['tickers']
     params = model_spec.get('params', {})
     
+    # Load parent metadata to get the EXACT indicators and params the parent was trained with.
+    # This is critical: the offspring must train in the same state space as its parent,
+    # otherwise the inherited weights expect a different input shape.
+    parent_metadata = {}
+    parent_metadata_path = model_spec.get('metadata_path')
+    if not parent_metadata_path:
+        # Try to find metadata from parent path
+        parent_dir = os.path.dirname(parent_path)
+        candidate = os.path.join(parent_dir, f"{parent_id}_metadata.yaml")
+        if os.path.exists(candidate):
+            parent_metadata_path = candidate
+    
+    if parent_metadata_path and os.path.exists(parent_metadata_path):
+        with open(parent_metadata_path, 'r') as f:
+            parent_metadata = yaml.safe_load(f) or {}
+    
+    # Use parent's tech indicators if available, otherwise fall back to base config
+    tech_indicators = parent_metadata.get(
+        'tech_indicators',
+        params.get('tech_indicators', base_config['features']['technical_indicators'])
+    )
+    
+    # Use parent's algorithm (not hardcoded), fall back to params then 'ppo'
+    algorithm = parent_metadata.get(
+        'algorithm',
+        params.get('algorithm', 'ppo')
+    )
+    # Override params so downstream code uses the correct algorithm
+    params['algorithm'] = algorithm
+    
     # Create new model ID
     new_model_id = f"{parent_id}_g{generation}"
     
     print(f"\n{'='*80}")
-    print(f"CONTINUING MODEL: {parent_id} → {new_model_id}")
+    print(f"CONTINUING MODEL: {parent_id} -> {new_model_id}")
     print(f"{'='*80}")
     print(f"Parent: {parent_id}")
     print(f"Generation: {generation}")
+    print(f"Algorithm: {algorithm.upper()}")
+    print(f"Tech indicators: {len(tech_indicators)} ({tech_indicators})")
     print(f"Additional timesteps: {additional_timesteps:,}")
     print(f"Learning rate multiplier: {lr_multiplier}")
     print(f"{'='*80}")
@@ -77,10 +109,10 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
             df = data_loader.download_data()
             data_loader.save_data(df, data_path)
         
-        # Feature engineering
-        print(f"[{new_model_id}] Engineering features...")
+        # Feature engineering - use parent's indicators to match state space
+        print(f"[{new_model_id}] Engineering features with {len(tech_indicators)} indicators...")
         feature_engineer = FeatureEngineer(
-            tech_indicator_list=base_config['features']['technical_indicators'],
+            tech_indicator_list=tech_indicators,
             use_turbulence=base_config['features']['use_turbulence']
         )
         df = feature_engineer.preprocess_data(df)
@@ -93,36 +125,25 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
             test_ratio=base_config['data']['test_ratio']
         )
         
-        # Create environments
+        # Create environments - must match parent's training env exactly
         print(f"[{new_model_id}] Creating environments...")
-        # Use actual number of tickers in the data
         actual_stock_dim = len(train_df['tic'].unique())
         
-        train_env = StockTradingEnv(
-            df=train_df,
+        env_kwargs = dict(
             stock_dim=actual_stock_dim,
-            hmax=base_config['environment']['hmax'],
-            initial_amount=params.get('initial_capital', 100000),
+            initial_amount=base_config['environment']['initial_amount'],
             transaction_cost_pct=base_config['environment']['transaction_cost_pct'],
-            reward_scaling=params.get('reward_scaling', 1e-4),
-            tech_indicator_list=base_config['features']['technical_indicators'],
-            turbulence_threshold=base_config['features']['turbulence_threshold']
+            reward_scaling=1.0,  # Not used with multi-component rewards
+            tech_indicator_list=tech_indicators,
+            turbulence_threshold=base_config['features']['turbulence_threshold'],
+            max_position_pct=base_config['environment'].get('max_position_pct', 0.3)
         )
         
-        val_env = StockTradingEnv(
-            df=val_df,
-            stock_dim=actual_stock_dim,
-            hmax=base_config['environment']['hmax'],
-            initial_amount=params.get('initial_capital', 100000),
-            transaction_cost_pct=base_config['environment']['transaction_cost_pct'],
-            reward_scaling=params.get('reward_scaling', 1e-4),
-            tech_indicator_list=base_config['features']['technical_indicators'],
-            turbulence_threshold=base_config['features']['turbulence_threshold']
-        )
+        train_env = StockTradingEnv(df=train_df, **env_kwargs)
+        val_env = StockTradingEnv(df=val_df, **env_kwargs)
         
         # Modify config with adjusted learning rate
         model_config = base_config.copy()
-        algorithm = params.get('algorithm', 'ppo')
         
         # Ensure algorithm config section exists
         if algorithm not in model_config['training']:
@@ -137,7 +158,7 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
         
         # Apply algorithm-specific parameters
         if algorithm == 'ppo':
-            for param_key in ['n_steps', 'batch_size', 'gamma', 'clip_range', 'ent_coef']:
+            for param_key in ['n_steps', 'batch_size', 'gamma', 'clip_range', 'ent_coef', 'weight_decay']:
                 if param_key in params:
                     model_config['training'][algorithm][param_key] = params[param_key]
         elif algorithm == 'sac':
@@ -160,7 +181,12 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
         model_path = os.path.join(models_dir, f"{new_model_id}_{algorithm}.zip")
         trainer.save_model(model_path)
         
-        # Save metadata
+        # Save indicator stats for inference (matches automated_trainer behavior)
+        indicator_stats = feature_engineer.get_indicator_stats(df)
+        indicator_stats_path = os.path.join(models_dir, f"{new_model_id}_indicator_stats.json")
+        feature_engineer.save_indicator_stats(indicator_stats, indicator_stats_path)
+        
+        # Save metadata - include tech_indicators so offspring inherit them
         metadata_path = os.path.join(models_dir, f"{new_model_id}_metadata.yaml")
         base_timesteps = model_spec.get('base_timesteps', 500000)
         total_timesteps = base_timesteps + additional_timesteps
@@ -171,6 +197,7 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
             'generation': generation,
             'algorithm': algorithm,
             'tickers': tickers,
+            'tech_indicators': tech_indicators,
             'training_type': 'continuation',
             'base_timesteps': base_timesteps,
             'additional_timesteps': additional_timesteps,
@@ -178,6 +205,7 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
             'learning_rate_multiplier': lr_multiplier,
             'training_date': datetime.now().isoformat(),
             'model_path': model_path,
+            'indicator_stats_path': indicator_stats_path,
             'parameters': params
         }
         

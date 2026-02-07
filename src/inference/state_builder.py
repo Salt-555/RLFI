@@ -42,9 +42,12 @@ class StateBuilder:
         # Track peak portfolio value for drawdown calculation
         self.peak_portfolio_value = initial_amount
         
+        # Track price history for momentum calculation (matches training env)
+        self.price_history = []
+        
         # State dimension calculation (must match trading_env.py)
-        # cash + prices + holdings + position_ratio + portfolio_growth + drawdown + indicators + turbulence
-        self.state_dim = 1 + 2 * self.stock_dim + 3 + len(tech_indicators) * self.stock_dim + 1
+        # cash + prices + holdings + position_ratio + portfolio_growth + drawdown + momentum + indicators + turbulence
+        self.state_dim = 1 + 2 * self.stock_dim + 4 + len(tech_indicators) * self.stock_dim + 1
     
     def set_indicator_stats(self, means: Dict[str, float], stds: Dict[str, float]):
         """
@@ -130,6 +133,19 @@ class StateBuilder:
         current_drawdown = (self.peak_portfolio_value - portfolio_value) / (self.peak_portfolio_value + 1e-6)
         state.append(current_drawdown)
         
+        # 4b. Momentum feature: 5-day price momentum (matches training env)
+        prices = np.array([stock_prices.get(ticker, 0.0) for ticker in self.tickers])
+        self.price_history.append(prices.copy())
+        if len(self.price_history) > 10:
+            self.price_history.pop(0)
+        
+        if len(self.price_history) >= 5:
+            old_prices = self.price_history[-5]
+            momentum = np.mean((prices - old_prices) / (old_prices + 1e-8))
+            state.append(float(np.clip(momentum, -1, 1)))
+        else:
+            state.append(0.0)
+        
         # 5. Technical indicators (z-score normalized, same as training)
         for indicator in self.tech_indicators:
             for ticker in self.tickers:
@@ -156,11 +172,12 @@ class StateBuilder:
         return state_array
     
     def reset_peak(self, initial_value: float = None):
-        """Reset peak portfolio value (call at start of new trading session)."""
+        """Reset peak portfolio value and price history (call at start of new trading session)."""
         if initial_value is not None:
             self.peak_portfolio_value = initial_value
         else:
             self.peak_portfolio_value = self.initial_amount
+        self.price_history = []
 
 
 class IndicatorCalculator:

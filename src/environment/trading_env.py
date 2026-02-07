@@ -36,7 +36,7 @@ class StockTradingEnv(gym.Env):
         self.day = day
         self.store_history_every = store_history_every
         
-        self.data = self._prepare_data()
+        self.data = self._prepare_data() if df is not None else None
         self.terminal = False
         
         # State: cash + prices + holdings + position_ratio + portfolio_growth + drawdown + momentum + indicators + turbulence
@@ -83,7 +83,15 @@ class StockTradingEnv(gym.Env):
         self.portfolio_value = self.initial_amount
         self.cash = self.initial_amount
         self.stocks_owned = np.zeros(self.stock_dim)
+        
+        # Handle dummy env (df=None) - used only for model loading
+        if self.data is None:
+            self.stock_prices = np.zeros(self.stock_dim)
+            state = np.zeros(self.state_dim, dtype=np.float32)
+            return state, {}
+        
         self.stock_prices = self._get_stock_prices(self.day)
+        self._initial_prices = self.stock_prices.copy()  # Reference for price normalization
         
         self.asset_memory = [self.initial_amount]
         self.portfolio_return_memory = [0]
@@ -202,31 +210,34 @@ class StockTradingEnv(gym.Env):
         
         # 1. PRIMARY: Log return scaled to meaningful range
         #    Log returns are better for compounding and standard in finance
-        #    Scale so 0.1% daily return ≈ 1.0 reward
-        log_return = np.log((self.portfolio_value / begin_value) + 1e-8)
+        #    Scale so 0.1% daily return ~ 1.0 reward
+        ratio = self.portfolio_value / begin_value
+        log_return = np.log(max(ratio, 1e-8))  # Protect against zero/negative
         return_reward = log_return * 1000
         
-        # 2. RISK ADJUSTMENT: Reduce reward during high volatility periods
-        #    This encourages consistent returns over erratic gains
+        # 2. RISK ADJUSTMENT: Smooth sigmoid instead of binary threshold
+        #    Gradually reduces reward as volatility increases rather than a
+        #    hard step at 2% which creates a discontinuity the agent can exploit
         risk_multiplier = 1.0
         if len(self.episode_returns) > 20:
             recent_volatility = np.std(self.episode_returns[-20:])
-            if recent_volatility > 0.02:  # High volatility threshold (2% daily std)
-                risk_multiplier = 0.5  # Halve rewards during volatile periods
+            # Sigmoid: 1.0 at vol=0, ~0.5 at vol=0.02, ~0.27 at vol=0.04
+            risk_multiplier = 1.0 / (1.0 + recent_volatility * 50)
         
         # 3. SPARSE PENALTY: Excessive trading (churning)
-        #    Only penalize when trading intensity is extreme, not every trade
+        #    Scaled down relative to return signal: typical daily return ~1.0,
+        #    so penalty should be ~0.5 to influence but not dominate
         trade_intensity = np.abs(actions).mean()  # 0 to 1 range
-        churn_penalty = -2.0 if trade_intensity > 0.8 else 0
+        churn_penalty = -0.5 if trade_intensity > 0.8 else 0
         
         # 4. SPARSE PENALTY: Catastrophic drawdown (>15% from peak)
-        #    Only penalize severe drawdowns, not normal fluctuations
+        #    Scaled to match return signal magnitude
         drawdown = (self.peak_portfolio_value - self.portfolio_value) / (self.peak_portfolio_value + 1e-6)
-        drawdown_penalty = -3.0 if drawdown > 0.15 else 0
+        drawdown_penalty = -1.0 if drawdown > 0.15 else 0
         
         # 5. BONUS: Reward for notably profitable steps
         #    Positive reinforcement for good trading decisions
-        profit_bonus = 0.5 if portfolio_return > 0.003 else 0  # >0.3% gain
+        profit_bonus = 0.3 if portfolio_return > 0.003 else 0  # >0.3% gain
         
         # 6. SMALL CONTINUOUS INCENTIVE: Encourage being invested
         #    Very small bonus for having skin in the game (not a penalty for not)
@@ -245,16 +256,25 @@ class StockTradingEnv(gym.Env):
     def _get_state(self) -> np.ndarray:
         state = [self.cash / self.initial_amount]
         
-        # Normalize stock prices (relative to first stock, capped)
-        if self.stock_prices[0] > 0:
-            normalized_prices = np.clip(self.stock_prices / self.stock_prices[0], 0, 10).tolist()
-        else:
-            normalized_prices = [1.0] * self.stock_dim
+        # Normalize stock prices: each stock relative to its own initial price
+        # so $200 and $20 stocks both start near 1.0. Falls back to absolute
+        # normalization by $100 if no initial prices tracked yet.
+        if not hasattr(self, '_initial_prices') or self._initial_prices is None:
+            self._initial_prices = self.stock_prices.copy()
+        
+        normalized_prices = []
+        for i in range(self.stock_dim):
+            ref = self._initial_prices[i] if self._initial_prices[i] > 0 else 100.0
+            normalized_prices.append(np.clip(self.stock_prices[i] / ref, 0, 10))
         state.extend(normalized_prices)
         
-        # Normalize stocks owned (as fraction of max reasonable position)
-        # Assume max ~1000 shares per position for normalization
-        normalized_holdings = np.clip(self.stocks_owned / 100, 0, 10).tolist()
+        # Normalize holdings relative to a position-value basis instead of
+        # a fixed share count. Holdings = (shares * price) / initial_amount
+        # so a $10k position in a $100k portfolio = 0.1 regardless of share price
+        normalized_holdings = []
+        for i in range(self.stock_dim):
+            holding_value = self.stocks_owned[i] * self.stock_prices[i]
+            normalized_holdings.append(np.clip(holding_value / (self.initial_amount * 0.1), 0, 10))
         state.extend(normalized_holdings)
         
         # Position-aware features (NEW)

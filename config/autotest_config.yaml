@@ -8,7 +8,7 @@ autotest:
   
   training:
     num_models_to_train: 20  # Total models (used only if training_strategy.yaml missing)
-    base_timesteps: 1500000  # Default timesteps for new models
+    base_timesteps: 3000000  # Default timesteps for new models (increased for grokking)
     
     # Parameter variations for training - PPO and SAC
     algorithms:
@@ -82,14 +82,11 @@ autotest:
       - 0.995
     
     clip_range_variations:
-      - 0.1
-      - 0.2
-      - 0.3
+      - 0.1  # Tighter clipping prevents large destructive updates
     
-    ent_coef_variations:
-      - 0.0
-      - 0.01
-      - 0.05
+    # Weight decay (L2 regularization) to prevent memorization
+    weight_decay_variations:
+      - 0.00001  # 1e-5 L2 regularization
     
     # Network architecture variations (pi and vf networks)
     net_arch_variations:
@@ -164,6 +161,12 @@ autotest:
       min_total_return: 0.0      # Minimum return (0 = must be profitable)
       max_drawdown: 0.25         # Maximum drawdown allowed (25%)
     
+    # Grokking gate - verify models have genuinely learned before paper trading
+    # Uses weight matrix spectral analysis + eval curve phase detection
+    # to distinguish real learning from memorization of training data
+    grokking_gate:
+      enabled: true              # Set to false to skip grokking checks
+    
     # Schedule for continuous operation
     daily_training_limit: 5      # Max models to train per day
     training_hour: 2             # 2 AM (daily)
@@ -174,6 +177,11 @@ autotest:
     # Daily paper trading schedule (market hours)
     market_open_hour: 7          # 7:30 AM Mountain = 9:30 AM Eastern
     market_close_hour: 14        # 2:00 PM Mountain = 4:00 PM Eastern
+    
+    # Circuit breaker - cull models immediately if they hit catastrophic loss
+    # during paper trading, instead of waiting for Saturday culling cycle
+    circuit_breaker_loss: -0.10     # Cull if cumulative loss exceeds 10%
+    circuit_breaker_sharpe: -1.5    # Cull if Sharpe drops below -1.5 (after 5+ days)
     
     # Genetic evolution - spawn offspring from elite performers
     genetic_training:

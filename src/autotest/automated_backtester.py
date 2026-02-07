@@ -41,6 +41,10 @@ class AutomatedBacktester:
         self.strategy_db = StrategyDatabase(db_path)
         
         self.backtest_results = []
+        
+        # Data cache: avoid re-downloading the same tickers during a backtest session
+        # Key: frozenset of tickers, Value: processed DataFrame
+        self._data_cache = {}
     
     def backtest_model(self, model_info: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -75,25 +79,32 @@ class AutomatedBacktester:
         }
         
         try:
-            # Load data for backtesting
+            # Load data for backtesting (with cache to avoid duplicate downloads)
             print(f"[{model_id}] Loading backtest data...")
             
-            # Use recent historical data for backtesting
             end_date = datetime.now()
             start_date = end_date - timedelta(days=self.autotest_config['backtesting']['test_period_days'] + 60)
             
-            data_loader = DataLoader(
-                tickers=tickers,
-                start_date=start_date.strftime('%Y-%m-%d'),
-                end_date=end_date.strftime('%Y-%m-%d')
-            )
+            cache_key = frozenset(tickers)
+            if cache_key in self._data_cache:
+                print(f"[{model_id}] Using cached data for {tickers}")
+                df = self._data_cache[cache_key].copy()
+            else:
+                data_loader = DataLoader(
+                    tickers=tickers,
+                    start_date=start_date.strftime('%Y-%m-%d'),
+                    end_date=end_date.strftime('%Y-%m-%d')
+                )
+                df = data_loader.download_data()
+                self._data_cache[cache_key] = df.copy()
             
-            df = data_loader.download_data()
-            
-            # Feature engineering
-            print(f"[{model_id}] Engineering features...")
+            # Feature engineering - use model-specific indicators if available
+            # This is critical: the backtest must use the same indicators the model
+            # was trained with, otherwise the state vector dimensions won't match
+            tech_indicators = model_info.get('tech_indicators', self.base_config['features']['technical_indicators'])
+            print(f"[{model_id}] Engineering features ({len(tech_indicators)} indicators)...")
             feature_engineer = FeatureEngineer(
-                tech_indicator_list=self.base_config['features']['technical_indicators'],
+                tech_indicator_list=tech_indicators,
                 use_turbulence=self.base_config['features']['use_turbulence']
             )
             df = feature_engineer.preprocess_data(df)
@@ -334,19 +345,49 @@ class AutomatedBacktester:
             print("No successful backtests to rank")
             return []
         
+        # Collect all metric values for min-max normalization
+        # Without normalization, Sharpe (0-2) and Sortino (0-3) dominate over
+        # total_return (0.0-0.5) and win_rate (0.4-0.6) despite the config weights
+        metric_keys = ['sharpe_ratio', 'total_return', 'win_rate', 'sortino_ratio']
+        metric_values = {k: [] for k in metric_keys}
+        dd_values = []  # max_drawdown handled separately (inverted)
+        
+        for result in successful_results:
+            metrics = result['metrics']
+            for k in metric_keys:
+                metric_values[k].append(metrics.get(k, 0))
+            dd_values.append(1 - metrics.get('max_drawdown', 1))  # Inverted: lower DD = higher score
+        
+        # Compute min-max ranges
+        metric_ranges = {}
+        for k in metric_keys:
+            vals = metric_values[k]
+            min_v, max_v = min(vals), max(vals)
+            metric_ranges[k] = (min_v, max_v - min_v) if (max_v - min_v) > 1e-8 else (min_v, 1.0)
+        
+        dd_min, dd_range = min(dd_values), max(dd_values) - min(dd_values)
+        if dd_range < 1e-8:
+            dd_range = 1.0
+        
         ranked_models = []
         
         for result in successful_results:
             metrics = result['metrics']
             
-            # Calculate weighted score
-            # Note: max_drawdown is inverted (lower is better)
+            # Normalize each metric to 0-1 range, then apply weights
+            normalized = {}
+            for k in metric_keys:
+                min_v, range_v = metric_ranges[k]
+                normalized[k] = (metrics.get(k, 0) - min_v) / range_v
+            
+            dd_score = ((1 - metrics.get('max_drawdown', 1)) - dd_min) / dd_range
+            
             score = (
-                weights['sharpe_ratio'] * metrics.get('sharpe_ratio', 0) +
-                weights['total_return'] * metrics.get('total_return', 0) +
-                weights['max_drawdown'] * (1 - metrics.get('max_drawdown', 1)) +  # Inverted
-                weights['win_rate'] * metrics.get('win_rate', 0) +
-                weights['sortino_ratio'] * metrics.get('sortino_ratio', 0)
+                weights['sharpe_ratio'] * normalized['sharpe_ratio'] +
+                weights['total_return'] * normalized['total_return'] +
+                weights['max_drawdown'] * dd_score +
+                weights['win_rate'] * normalized['win_rate'] +
+                weights['sortino_ratio'] * normalized['sortino_ratio']
             )
             
             ranked_models.append((result['model_id'], score, result))

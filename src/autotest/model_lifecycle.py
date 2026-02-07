@@ -51,6 +51,7 @@ class ModelLifecycleManager:
     def _initialize_lifecycle_tables(self):
         """Create lifecycle tracking tables if they don't exist."""
         self.conn = sqlite3.connect(self.db_path)
+        self.conn.execute("PRAGMA journal_mode=WAL")  # Allow concurrent reads during writes
         cursor = self.conn.cursor()
         
         # Model lifecycle state table
@@ -593,9 +594,14 @@ class ModelLifecycleManager:
             
             # Calculate genetic fitness score
             # Weight: 40% backtest performance, 60% paper trading (real-world matters more)
-            # Normalize each component
-            backtest_score = (backtest_sharpe * 0.5 + min(backtest_return * 10, 1) * 0.5)
-            paper_score = (paper_sharpe * 0.5 + min(paper_return * 10, 1) * 0.5)
+            # Normalize each component to 0-1 range with proper capping
+            capped_bt_sharpe = np.clip(backtest_sharpe / 2.0, 0, 1)  # Sharpe 0-2 -> 0-1
+            capped_bt_return = np.clip(backtest_return * 5, 0, 1)     # Return 0-20% -> 0-1
+            capped_pt_sharpe = np.clip(paper_sharpe / 2.0, 0, 1)
+            capped_pt_return = np.clip(paper_return * 5, 0, 1)
+            
+            backtest_score = 0.5 * capped_bt_sharpe + 0.5 * capped_bt_return
+            paper_score = 0.5 * capped_pt_sharpe + 0.5 * capped_pt_return
             
             fitness_score = 0.4 * backtest_score + 0.6 * paper_score
             

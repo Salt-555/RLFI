@@ -106,6 +106,7 @@ class ParameterGenerator:
         gamma_variations = self.training_config.get('gamma_variations', [0.99])
         clip_range_variations = self.training_config.get('clip_range_variations', [0.2])
         ent_coef_variations = self.training_config.get('ent_coef_variations', [0.01])
+        weight_decay_variations = self.training_config.get('weight_decay_variations', [0.0])
         
         # SAC-specific hyperparameters
         sac_buffer_size_variations = self.training_config.get('sac_buffer_size_variations', [1000000])
@@ -170,6 +171,7 @@ class ParameterGenerator:
                     'batch_size': random.choice(batch_size_variations),
                     'clip_range': random.choice(clip_range_variations),
                     'ent_coef': random.choice(ent_coef_variations),
+                    'weight_decay': random.choice(weight_decay_variations),
                 })
             elif algo == 'sac':
                 params.update({

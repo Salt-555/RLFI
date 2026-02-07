@@ -63,7 +63,27 @@ class PaperTradeOrchestrator:
         
         try:
             # Get model-specific tech indicators from metadata if available
-            tech_indicators = model_info.get('tech_indicators', self.base_config['features']['technical_indicators'])
+            tech_indicators = model_info.get('tech_indicators')
+            
+            # If not provided directly, try loading from model metadata file
+            if not tech_indicators:
+                metadata_path = model_info.get('metadata_path')
+                if not metadata_path:
+                    # Derive metadata path from model path
+                    # e.g. "autotest_models/20260126_0200_001_ppo.zip" -> "autotest_models/20260126_0200_001_metadata.yaml"
+                    base = model_path.rsplit('_', 1)[0]  # Remove "_ppo.zip" or "_sac.zip"
+                    metadata_path = f"{base}_metadata.yaml"
+                
+                if metadata_path and os.path.exists(metadata_path):
+                    with open(metadata_path, 'r') as f:
+                        metadata = yaml.safe_load(f)
+                    tech_indicators = metadata.get('tech_indicators')
+                    print(f"[{model_id}] Loaded {len(tech_indicators)} indicators from metadata")
+            
+            # Fall back to default config if still not found
+            if not tech_indicators:
+                tech_indicators = self.base_config['features']['technical_indicators']
+                print(f"[{model_id}] WARNING: Using default indicators (may cause dimension mismatch)")
             
             # Create dummy environment for loading model (matches training config)
             dummy_env = StockTradingEnv(
@@ -90,6 +110,7 @@ class PaperTradeOrchestrator:
                 'tickers': tickers,
                 'algorithm': algorithm,
                 'params': params,
+                'tech_indicators': tech_indicators,
                 'success': True
             }
             
@@ -132,10 +153,13 @@ class PaperTradeOrchestrator:
         }
         
         try:
+            # Use model-specific indicators (from setup_model_for_trading)
+            tech_indicators = model_info.get('tech_indicators', self.base_config['features']['technical_indicators'])
+            
             # Create metadata for LivePaperTrader
             metadata = {
                 'tickers': tickers,
-                'tech_indicators': self.base_config['features']['technical_indicators'],
+                'tech_indicators': tech_indicators,
                 'state_space': None  # Will be calculated by LivePaperTrader
             }
             
@@ -145,7 +169,7 @@ class PaperTradeOrchestrator:
                 model=model,
                 tickers=tickers,
                 initial_capital=self.autotest_config['paper_trading']['initial_capital'],
-                tech_indicators=self.base_config['features']['technical_indicators'],
+                tech_indicators=tech_indicators,
                 model_metadata=metadata,
                 update_frequency="5Min"
             )

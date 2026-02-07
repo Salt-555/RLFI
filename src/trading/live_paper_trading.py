@@ -18,7 +18,7 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame
 
-from stable_baselines3 import PPO, A2C, DDPG
+from stable_baselines3 import PPO, A2C, DDPG, SAC
 
 # Use our own FeatureEngineer for consistency with training
 from src.data.feature_engineer import FeatureEngineer
@@ -99,9 +99,22 @@ class LivePaperTrader:
             use_turbulence=False  # Disable turbulence for live trading (needs 252 days history)
         )
         
-        # State dimensions
+        # Position sizing limit - must match training env's max_position_pct
+        # Training env limits each buy to portfolio_value * max_position_pct * action
+        self.max_position_pct = model_metadata.get('max_position_pct', 0.3)
+        
+        # State dimensions - must match training env: 1 + 2*stock_dim + 4 + indicators*stock_dim + 1
         self.stock_dim = len(tickers)
-        self.state_space = model_metadata.get('state_space', 1 + 2*self.stock_dim + len(tech_indicators)*self.stock_dim)
+        self.state_space = 1 + 2 * self.stock_dim + 4 + len(tech_indicators) * self.stock_dim + 1
+        
+        # Track peak portfolio value for drawdown calculation (matches training env)
+        self.peak_portfolio_value = initial_capital
+        
+        # Track price history for momentum calculation (matches training env)
+        self.price_history = []
+        
+        # Track initial prices for per-stock normalization (matches trading_env._initial_prices)
+        self._initial_prices = None
         
     def get_account_info(self) -> Dict:
         """Get current account information from Alpaca"""
@@ -217,7 +230,15 @@ class LivePaperTrader:
     
     def calculate_features(self, historical_df: pd.DataFrame, current_prices: Dict[str, float]) -> np.ndarray:
         """
-        Calculate technical indicators and construct state vector
+        Calculate technical indicators and construct state vector.
+        
+        CRITICAL: This must produce a state vector identical in structure, dimension,
+        and normalization to StockTradingEnv._get_state() used during training.
+        
+        Training state layout:
+        [cash/initial] + [prices_normalized] + [holdings_normalized] +
+        [position_ratio, portfolio_growth, drawdown, momentum] +
+        [z-score_indicators...] + [turbulence/100]
         
         Args:
             historical_df: Historical OHLCV data
@@ -259,38 +280,83 @@ class LivePaperTrader:
             extended_df['date'] = pd.to_datetime(extended_df['date'])
             
             # Calculate technical indicators using same method as training
+            # NOTE: FeatureEngineer.add_technical_indicators() already applies z-score
+            # normalization and clips to [-5, 5], matching training preprocessing
             processed = self.fe.add_technical_indicators(extended_df)
             
-            # Get latest row for each ticker
-            latest_data = processed[processed['date'] == current_date]
+            # Get latest row for each ticker (sorted to match training order)
+            latest_date = processed['date'].max()
+            latest_data = processed[processed['date'] == latest_date].sort_values('tic')
             
-            # Get valid tickers (those with data)
-            valid_tickers = latest_data['tic'].unique().tolist()
+            # Build ordered price array matching self.tickers order
+            prices = np.array([current_prices.get(t, 0.0) for t in self.tickers])
+            holdings = np.array([self.positions.get(t, 0) for t in self.tickers])
             
-            # Construct state vector: [cash, prices..., shares..., indicators...]
-            state = [self.cash]
+            # === BUILD STATE VECTOR (must match StockTradingEnv._get_state exactly) ===
+            state = []
             
-            # Add current prices (only for valid tickers)
-            for ticker in valid_tickers:
-                state.append(current_prices.get(ticker, 0.0))
+            # 1. Normalized cash (same as training)
+            state.append(self.cash / self.initial_capital)
             
-            # Add current shares (only for valid tickers)
-            for ticker in valid_tickers:
-                state.append(self.positions.get(ticker, 0))
+            # 2. Normalized stock prices: each stock relative to its own initial price
+            #    Matches trading_env._get_state() normalization
+            if self._initial_prices is None:
+                self._initial_prices = prices.copy()
             
-            # Add technical indicators (only for valid tickers)
+            for i in range(self.stock_dim):
+                ref = self._initial_prices[i] if self._initial_prices[i] > 0 else 100.0
+                state.append(np.clip(prices[i] / ref, 0, 10))
+            
+            # 3. Normalized holdings: (shares * price) / (initial_amount * 0.1)
+            #    Matches trading_env value-based normalization
+            for i in range(self.stock_dim):
+                holding_value = holdings[i] * prices[i]
+                state.append(np.clip(holding_value / (self.initial_capital * 0.1), 0, 10))
+            
+            # 4. Position-aware features (NEW - was missing before!)
+            total_stock_value = np.sum(holdings * prices)
+            position_ratio = total_stock_value / (self.portfolio_value + 1e-6)
+            state.append(position_ratio)
+            
+            portfolio_growth = self.portfolio_value / self.initial_capital
+            state.append(portfolio_growth)
+            
+            # Update peak for drawdown
+            if self.portfolio_value > self.peak_portfolio_value:
+                self.peak_portfolio_value = self.portfolio_value
+            current_drawdown = (self.peak_portfolio_value - self.portfolio_value) / (self.peak_portfolio_value + 1e-6)
+            state.append(current_drawdown)
+            
+            # 5. Momentum feature: 5-day price momentum (average across stocks)
+            self.price_history.append(prices.copy())
+            if len(self.price_history) > 10:
+                self.price_history.pop(0)
+            
+            if len(self.price_history) >= 5:
+                old_prices = self.price_history[-5]
+                momentum = np.mean((prices - old_prices) / (old_prices + 1e-8))
+                state.append(np.clip(momentum, -1, 1))
+            else:
+                state.append(0.0)
+            
+            # 6. Technical indicators (already z-score normalized by FeatureEngineer)
             for indicator in self.tech_indicators:
-                for ticker in valid_tickers:
+                for ticker in self.tickers:
                     ticker_data = latest_data[latest_data['tic'] == ticker]
                     if not ticker_data.empty and indicator in ticker_data.columns:
                         state.append(float(ticker_data[indicator].iloc[0]))
                     else:
                         state.append(0.0)
             
+            # 7. Turbulence (normalized, 0 for live trading since we don't calculate it)
+            state.append(0.0)
+            
             return np.array(state, dtype=np.float32)
             
         except Exception as e:
             print(f"Error calculating features: {e}")
+            import traceback
+            traceback.print_exc()
             # Return zero state on error
             return np.zeros(self.state_space, dtype=np.float32)
     
@@ -314,9 +380,11 @@ class LivePaperTrader:
                 available_cash = float(account_info['buying_power'])
             
             if action > 0.01:
-                # Buy order - calculate shares based on available cash and action magnitude
-                # Match training environment logic: cash * action
-                cash_to_use = available_cash * abs(action)
+                # Buy order - match training environment position sizing:
+                # Training env: max_position_value = portfolio_value * max_position_pct * abs(action)
+                # Then also limited by available cash
+                max_position_value = self.portfolio_value * self.max_position_pct * abs(action)
+                cash_to_use = min(max_position_value, available_cash)
                 shares_to_buy = int(cash_to_use / (current_price * 1.001))  # Include 0.1% transaction cost
                 
                 if shares_to_buy > 0:

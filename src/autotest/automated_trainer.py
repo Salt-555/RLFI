@@ -181,6 +181,8 @@ class AutomatedTrainer:
                     model_config['training'][algorithm]['clip_range'] = params['clip_range']
                 if 'ent_coef' in params:
                     model_config['training'][algorithm]['ent_coef'] = params['ent_coef']
+                if 'weight_decay' in params:
+                    model_config['training'][algorithm]['weight_decay'] = params['weight_decay']
                 # Apply network architecture
                 if 'net_arch' in params:
                     pi_arch, vf_arch = params['net_arch']
@@ -354,13 +356,19 @@ class AutomatedTrainer:
     
     def select_best_models(self, results: List[Dict[str, Any]]) -> List[str]:
         """
-        Select models based on eval performance and learning trend.
-        Only models that show actual learning (not just luck) are promoted.
+        Select models based on eval performance, learning trend, and grokking analysis.
+        Only models that show actual learning (not just memorization) are promoted.
+        
+        Grokking check: For each model, loads the trained weights and runs spectral
+        analysis on weight matrices + eval curve phase detection to verify the model
+        has genuinely internalized trading patterns vs memorizing training data.
+        Models that fail the grokking check are blocked from backtesting.
         """
         from src.evaluation.model_selector import ModelSelector
+        from stable_baselines3 import PPO, SAC, A2C, DDPG
         
         print("\n" + "="*60)
-        print("MODEL SELECTION PHASE")
+        print("MODEL SELECTION PHASE (with Grokking Analysis)")
         print("="*60)
         
         selector = ModelSelector(
@@ -369,6 +377,14 @@ class AutomatedTrainer:
             max_variance_ratio=0.5,    # Must be reasonably consistent
             top_k=5                    # Keep top 5 models for testing
         )
+        
+        # Map algorithm names to SB3 classes for model loading
+        algo_classes = {
+            'ppo': PPO,
+            'sac': SAC,
+            'a2c': A2C,
+            'ddpg': DDPG,
+        }
         
         for result in results:
             if not result['success']:
@@ -388,13 +404,52 @@ class AutomatedTrainer:
                 eval_stds = metadata.get('eval_stds', [])
                 
                 if eval_rewards and len(eval_rewards) >= 3:
-                    selector.evaluate_model(
+                    # Load the trained model for grokking analysis
+                    loaded_model = None
+                    load_error = None
+                    
+                    # Try loading with retry logic (file might still be writing)
+                    algorithm = result['params'].get('algorithm', 'ppo').lower()
+                    algo_class = algo_classes.get(algorithm, PPO)
+                    
+                    for attempt in range(3):
+                        try:
+                            loaded_model = algo_class.load(model_path, device='cpu')
+                            print(f"[{model_id}] Loaded model for grokking analysis (attempt {attempt + 1})")
+                            break
+                        except Exception as e:
+                            load_error = e
+                            if attempt < 2:
+                                print(f"[{model_id}] Model load attempt {attempt + 1} failed, retrying...")
+                                import time
+                                time.sleep(0.5)  # Wait for file to be fully written
+                            else:
+                                print(f"[{model_id}] ERROR: Could not load model for grokking analysis after 3 attempts: {e}")
+                    
+                    evaluation = selector.evaluate_model(
                         model_id=model_id,
                         model_path=model_path,
                         eval_rewards=eval_rewards,
                         eval_timesteps=eval_timesteps,
-                        eval_stds=eval_stds
+                        eval_stds=eval_stds,
+                        loaded_model=loaded_model
                     )
+                    
+                    # ALWAYS store grokking results in metadata for downstream use
+                    # This ensures colosseum mode can check if grokking analysis was performed
+                    metadata['grokking_analysis'] = evaluation.grokking_details if evaluation.grokking_details else {}
+                    metadata['has_grokked'] = evaluation.has_grokked
+                    metadata['grokking_error'] = str(load_error) if load_error else None
+                    metadata['grokking_attempted'] = True
+                    
+                    with open(metadata_path, 'w') as f:
+                        yaml.dump(metadata, f)
+                    
+                    if loaded_model is None:
+                        print(f"[{model_id}] WARNING: Model passed selection but grokking analysis was skipped due to load failure")
+                    
+                    # Free model memory
+                    del loaded_model
                 else:
                     print(f"[{model_id}] Skipped - insufficient eval history")
         

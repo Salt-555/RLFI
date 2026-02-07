@@ -137,12 +137,40 @@ class Backtester:
         return metrics
     
     def compare_with_baseline(self, baseline_strategy: str = 'buy_and_hold'):
+        """Compare backtest results against a baseline strategy."""
         if self.results is None:
             raise ValueError("Run backtest first")
         
-        initial_value = self.results['portfolio_values'][0]
+        portfolio_values = self.results['portfolio_values']
+        initial_value = portfolio_values[0]
+        final_value = portfolio_values[-1]
+        model_return = (final_value - initial_value) / initial_value
         
         if baseline_strategy == 'buy_and_hold':
+            # Simulate buy-and-hold: invest all cash equally at start, hold
+            # Uses the first and last day prices from the env
             print("Comparing with Buy-and-Hold strategy...")
+            first_day = self.env.data_by_day.get(0)
+            last_day_idx = max(self.env.data_by_day.keys())
+            last_day = self.env.data_by_day.get(last_day_idx)
+            
+            if first_day is not None and last_day is not None:
+                start_prices = first_day['close'].values
+                end_prices = last_day['close'].values
+                
+                # Equal-weight portfolio return
+                bnh_returns = (end_prices - start_prices) / (start_prices + 1e-8)
+                bnh_return = float(np.mean(bnh_returns))
+                
+                print(f"\n  Model Return:       {model_return*100:+.2f}%")
+                print(f"  Buy-and-Hold Return: {bnh_return*100:+.2f}%")
+                print(f"  Excess Return:       {(model_return - bnh_return)*100:+.2f}%")
+                
+                return {
+                    'model_return': model_return,
+                    'baseline_return': bnh_return,
+                    'excess_return': model_return - bnh_return
+                }
         
         print("\nComparison complete")
+        return {'model_return': model_return}

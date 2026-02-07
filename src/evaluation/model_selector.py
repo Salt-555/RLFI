@@ -1,10 +1,15 @@
 """
-Model Selector - Intelligent model selection based on eval scores and learning trend.
-Only promotes models that show both good performance AND evidence of actual learning.
+Model Selector - Intelligent model selection based on eval scores, learning trend,
+and grokking analysis. Only promotes models that show both good performance AND
+evidence of actual learning (not just memorization).
+
+Grokking Check: After evaluating learning curves, we run spectral analysis on the
+model's weight matrices and eval curve phase detection to verify the model has
+genuinely internalized trading patterns vs memorizing training data.
 """
 import numpy as np
 from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 
@@ -23,6 +28,12 @@ class ModelEvaluation:
     consistency_score: float  # Lower variance = more consistent
     learning_score: float  # Combined metric for model selection
     passed_selection: bool
+    # Grokking analysis results
+    grokking_score: float = 0.0
+    grokking_phase: str = 'unknown'
+    has_grokked: bool = False
+    grokking_reason: str = ''
+    grokking_details: Dict = field(default_factory=dict)
 
 
 class ModelSelector:
@@ -141,10 +152,23 @@ class ModelSelector:
         model_path: str,
         eval_rewards: List[float],
         eval_timesteps: List[int],
-        eval_stds: Optional[List[float]] = None
+        eval_stds: Optional[List[float]] = None,
+        loaded_model=None
     ) -> ModelEvaluation:
         """
         Evaluate a single model and determine if it passes selection criteria.
+        
+        If loaded_model is provided, also runs grokking analysis (weight matrix
+        spectral analysis + eval curve phase detection) to verify the model has
+        genuinely learned vs just memorized training data.
+        
+        Args:
+            model_id: Unique model identifier
+            model_path: Path to saved model file
+            eval_rewards: Rewards at each eval checkpoint
+            eval_timesteps: Timesteps at each eval checkpoint  
+            eval_stds: Standard deviations at each eval checkpoint
+            loaded_model: Optional loaded SB3 model for grokking analysis
         """
         if eval_stds is None:
             eval_stds = [0.0] * len(eval_rewards)
@@ -156,12 +180,55 @@ class ModelSelector:
         consistency_score = self.calculate_consistency(eval_rewards, eval_stds)
         learning_score = self.calculate_learning_score(final_reward, trend_score, consistency_score)
         
+        # Run grokking analysis if model is provided
+        grokking_score = 0.0
+        grokking_phase = 'unknown'
+        has_grokked = False
+        grokking_reason = 'no model provided for analysis'
+        grokking_details = {}
+        
+        if loaded_model is not None:
+            try:
+                from src.evaluation.grokking_detector import GrokkingDetector
+                
+                detector = GrokkingDetector()
+                analysis = detector.analyze_model(
+                    model=loaded_model,
+                    eval_rewards=eval_rewards,
+                    eval_timesteps=eval_timesteps,
+                    eval_stds=eval_stds,
+                )
+                
+                grokking_score = analysis.grokking_score
+                grokking_phase = analysis.phase
+                has_grokked = analysis.has_grokked
+                grokking_reason = analysis.reason
+                grokking_details = detector.to_metadata_dict(analysis)
+                
+            except Exception as e:
+                grokking_reason = f'grokking analysis failed: {e}'
+                print(f"  [{model_id}] Warning: Grokking analysis failed: {e}")
+        
         # Determine if model passes selection criteria
-        passed = (
+        # Original criteria (performance-based)
+        performance_passed = (
             final_reward >= self.min_final_reward and
             trend_score >= self.min_trend_score and
             consistency_score >= (1 - self.max_variance_ratio)
         )
+        
+        # Grokking gate: if we ran grokking analysis, require it to pass
+        # If no model was provided (legacy path), skip grokking gate
+        if loaded_model is not None:
+            grokking_passed = has_grokked
+            passed = performance_passed and grokking_passed
+        else:
+            passed = performance_passed
+        
+        # Boost learning_score with grokking score for better ranking
+        if loaded_model is not None and grokking_score > 0:
+            # Blend: 60% original learning score, 40% grokking score
+            learning_score = 0.6 * learning_score + 0.4 * grokking_score
         
         evaluation = ModelEvaluation(
             model_id=model_id,
@@ -174,7 +241,12 @@ class ModelSelector:
             trend_score=trend_score,
             consistency_score=consistency_score,
             learning_score=learning_score,
-            passed_selection=passed
+            passed_selection=passed,
+            grokking_score=grokking_score,
+            grokking_phase=grokking_phase,
+            has_grokked=has_grokked,
+            grokking_reason=grokking_reason,
+            grokking_details=grokking_details
         )
         
         self.evaluations.append(evaluation)
@@ -224,6 +296,14 @@ class ModelSelector:
             lines.append(f"   Trend: {e.trend_score:+.3f} | Consistency: {e.consistency_score:.2f}")
             lines.append(f"   Learning Score: {e.learning_score:.3f}")
             
+            # Grokking analysis results
+            if e.grokking_phase != 'unknown':
+                grok_status = "✓" if e.has_grokked else "✗"
+                lines.append(f"   Grokking: {grok_status} {e.grokking_phase} "
+                           f"(score: {e.grokking_score:.3f})")
+                if e.grokking_reason:
+                    lines.append(f"   Grokking Detail: {e.grokking_reason}")
+            
             # Show why it failed if applicable
             if not e.passed_selection:
                 reasons = []
@@ -233,6 +313,8 @@ class ModelSelector:
                     reasons.append(f"negative trend ({e.trend_score:.3f} < {self.min_trend_score})")
                 if e.consistency_score < (1 - self.max_variance_ratio):
                     reasons.append(f"inconsistent ({e.consistency_score:.2f})")
+                if e.grokking_phase != 'unknown' and not e.has_grokked:
+                    reasons.append(f"failed grokking check ({e.grokking_phase})")
                 lines.append(f"   Reason: {', '.join(reasons)}")
         
         selected = self.select_models()
@@ -267,7 +349,12 @@ class ModelSelector:
                     "learning_score": float(e.learning_score),
                     "passed_selection": bool(e.passed_selection),
                     "eval_rewards": [float(r) for r in e.eval_rewards],
-                    "eval_timesteps": [int(t) for t in e.eval_timesteps]
+                    "eval_timesteps": [int(t) for t in e.eval_timesteps],
+                    "grokking_score": float(e.grokking_score),
+                    "grokking_phase": e.grokking_phase,
+                    "has_grokked": bool(e.has_grokked),
+                    "grokking_reason": e.grokking_reason,
+                    "grokking_details": e.grokking_details
                 }
                 for e in self.evaluations
             ],

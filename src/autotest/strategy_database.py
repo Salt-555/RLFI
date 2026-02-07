@@ -19,6 +19,7 @@ class StrategyDatabase:
     def initialize_database(self):
         """Create database tables if they don't exist"""
         self.conn = sqlite3.connect(self.db_path)
+        self.conn.execute("PRAGMA journal_mode=WAL")  # Allow concurrent reads during writes
         cursor = self.conn.cursor()
         
         # Strategies table - stores each trained model
@@ -36,6 +37,7 @@ class StrategyDatabase:
                 gamma REAL,
                 clip_range REAL,
                 ent_coef REAL,
+                weight_decay REAL,
                 reward_scaling REAL,
                 initial_capital REAL,
                 training_timesteps INTEGER,
@@ -135,9 +137,9 @@ class StrategyDatabase:
             INSERT OR REPLACE INTO strategies (
                 model_id, week_number, run_date, algorithm, tickers,
                 learning_rate, n_steps, batch_size, gamma, clip_range,
-                ent_coef, reward_scaling, initial_capital, training_timesteps,
+                ent_coef, weight_decay, reward_scaling, initial_capital, training_timesteps,
                 training_time_seconds, parameters_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             strategy_data['model_id'],
             week_number,
@@ -150,6 +152,7 @@ class StrategyDatabase:
             params.get('gamma'),
             params.get('clip_range'),
             params.get('ent_coef'),
+            params.get('weight_decay'),
             params.get('reward_scaling'),
             params.get('initial_capital'),
             params.get('timesteps'),

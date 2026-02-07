@@ -621,15 +621,34 @@ class AutoTestSystem:
                           f"paper={parent['paper_return']*100:+.1f}%, "
                           f"{parent['trading_days']} days)")
                     
-                    # Create offspring spec
+                    # Detect parent's algorithm from metadata or model path
+                    parent_algorithm = 'ppo'  # default fallback
+                    parent_metadata_path = parent.get('metadata_path')
+                    if parent_metadata_path and os.path.exists(parent_metadata_path):
+                        try:
+                            with open(parent_metadata_path, 'r') as f:
+                                p_meta = yaml.safe_load(f)
+                            parent_algorithm = p_meta.get('algorithm', 'ppo')
+                        except Exception:
+                            pass
+                    if parent_algorithm == 'ppo':
+                        # Try detecting from model filename as fallback
+                        model_filename = os.path.basename(parent['model_path']).lower()
+                        for algo in ['sac', 'a2c', 'ddpg']:
+                            if f'_{algo}.' in model_filename or model_filename.endswith(f'_{algo}.zip'):
+                                parent_algorithm = algo
+                                break
+                    
+                    # Create offspring spec - inherits parent's algorithm and indicators
                     offspring_spec = {
                         'parent_model': parent['model_id'],
                         'parent_path': parent['model_path'],
+                        'metadata_path': parent.get('metadata_path'),
                         'tickers': parent['tickers'],
                         'additional_timesteps': genetic_config.get('offspring_timesteps', 500000),
                         'learning_rate_multiplier': genetic_config.get('offspring_lr_multiplier', 0.3),
                         'generation': self._get_model_generation(parent['model_id']) + 1,
-                        'params': {'algorithm': 'ppo', 'tickers': parent['tickers']}
+                        'params': {'algorithm': parent_algorithm, 'tickers': parent['tickers']}
                     }
                     
                     # Train offspring
@@ -678,11 +697,15 @@ class AutoTestSystem:
         print("Backtesting models...")
         backtest_results = self.backtester.backtest_all_models(successful)
         
-        # Backtest quality gate - only models that pass enter VALIDATION
+        # Backtest quality gate + Grokking gate
+        # Models must pass BOTH backtest metrics AND grokking analysis to enter VALIDATION
         quality_gate = self.colosseum_config.get('backtest_quality_gate', {})
         min_sharpe = quality_gate.get('min_sharpe_ratio', 0.3)
         min_return = quality_gate.get('min_total_return', 0.0)
         max_drawdown = quality_gate.get('max_drawdown', 0.25)
+        
+        # Grokking gate config
+        grokking_gate_enabled = self.colosseum_config.get('grokking_gate', {}).get('enabled', True)
         
         passed_models = []
         failed_models = []
@@ -697,25 +720,66 @@ class AutoTestSystem:
             total_return = metrics.get('total_return', 0)
             drawdown = abs(metrics.get('max_drawdown', 1))
             
-            # Check quality gate
-            if sharpe >= min_sharpe and total_return >= min_return and drawdown <= max_drawdown:
+            # Gate 1: Backtest quality check
+            backtest_passed = (sharpe >= min_sharpe and total_return >= min_return and drawdown <= max_drawdown)
+            
+            if not backtest_passed:
+                failed_models.append(result)
+                self.lifecycle_manager.transition_state(model_id, ModelState.CULLED, 
+                    f"Failed quality gate: Sharpe={sharpe:.2f}, Return={total_return*100:.1f}%, DD={drawdown*100:.1f}%")
+                print(f"  ✗ {model_id}: FAILED backtest (Sharpe={sharpe:.2f}, Return={total_return*100:.1f}%, DD={drawdown*100:.1f}%)")
+                continue
+            
+            # Gate 2: Grokking check - has this model genuinely learned?
+            grokking_passed = True  # Default pass if gate disabled or check unavailable
+            grokking_reason = ""
+            
+            if grokking_gate_enabled:
+                # Check metadata for grokking analysis (saved by select_best_models)
+                model_info = next((r for r in successful if r['model_id'] == model_id), None)
+                metadata_path = model_info.get('metadata_path') if model_info else None
+                
+                if metadata_path and os.path.exists(metadata_path):
+                    try:
+                        with open(metadata_path, 'r') as f:
+                            metadata = yaml.safe_load(f)
+                        
+                        grokking_data = metadata.get('grokking_analysis', {})
+                        has_grokked = metadata.get('has_grokked', None)
+                        grokking_attempted = metadata.get('grokking_attempted', False)
+                        grokking_error = metadata.get('grokking_error', None)
+                        
+                        if has_grokked is not None:
+                            grokking_passed = has_grokked
+                            grokking_reason = grokking_data.get('reason', '')
+                        elif grokking_attempted and grokking_error:
+                            # Grokking was attempted but failed (e.g., model couldn't load)
+                            grokking_passed = False
+                            grokking_reason = f"grokking analysis failed: {grokking_error}"
+                        else:
+                            # No grokking analysis was run (legacy model or error)
+                            # Fall through - don't block on missing data
+                            grokking_reason = "no grokking analysis available"
+                    except Exception as e:
+                        grokking_reason = f"error reading grokking data: {e}"
+            
+            if backtest_passed and grokking_passed:
                 passed_models.append(result)
-                # Update backtest expectations and transition to VALIDATION
                 self.lifecycle_manager.update_backtest_expectations(
                     model_id=model_id,
                     expected_return=total_return,
                     expected_sharpe=sharpe
                 )
                 self.lifecycle_manager.transition_state(model_id, ModelState.VALIDATION)
-                print(f"  ✓ {model_id}: PASSED (Sharpe={sharpe:.2f}, Return={total_return*100:.1f}%, DD={drawdown*100:.1f}%)")
-            else:
+                grok_label = " [grokked]" if grokking_gate_enabled and grokking_reason else ""
+                print(f"  ✓ {model_id}: PASSED (Sharpe={sharpe:.2f}, Return={total_return*100:.1f}%, DD={drawdown*100:.1f}%){grok_label}")
+            elif backtest_passed and not grokking_passed:
                 failed_models.append(result)
-                # Mark as CULLED - didn't pass quality gate
                 self.lifecycle_manager.transition_state(model_id, ModelState.CULLED, 
-                    f"Failed quality gate: Sharpe={sharpe:.2f}, Return={total_return*100:.1f}%, DD={drawdown*100:.1f}%")
-                print(f"  ✗ {model_id}: FAILED (Sharpe={sharpe:.2f}, Return={total_return*100:.1f}%, DD={drawdown*100:.1f}%)")
+                    f"Failed grokking gate: {grokking_reason}")
+                print(f"  ✗ {model_id}: FAILED grokking check (Sharpe={sharpe:.2f} was good, but: {grokking_reason})")
         
-        print(f"\nQuality gate: {len(passed_models)} passed, {len(failed_models)} failed")
+        print(f"\nQuality + Grokking gate: {len(passed_models)} passed, {len(failed_models)} failed")
         
         # Promote top VALIDATION models to paper trading (ranked by composite score)
         if passed_models:
@@ -767,12 +831,25 @@ class AutoTestSystem:
             model_id = model_info['model_id']
             
             try:
+                # Detect algorithm from model path (e.g. "..._ppo.zip" or "..._sac.zip")
+                model_path = model_info['model_path']
+                algorithm = 'ppo'  # default
+                if model_path:
+                    model_filename = os.path.basename(model_path).lower()
+                    if '_sac.' in model_filename or model_filename.endswith('_sac.zip'):
+                        algorithm = 'sac'
+                    elif '_a2c.' in model_filename or model_filename.endswith('_a2c.zip'):
+                        algorithm = 'a2c'
+                    elif '_ddpg.' in model_filename or model_filename.endswith('_ddpg.zip'):
+                        algorithm = 'ddpg'
+                
                 # Setup model for trading
                 setup_result = self.orchestrator.setup_model_for_trading({
                     'model_id': model_id,
-                    'model_path': model_info['model_path'],
+                    'model_path': model_path,
+                    'metadata_path': model_info.get('metadata_path'),
                     'params': {
-                        'algorithm': 'ppo',
+                        'algorithm': algorithm,
                         'tickers': model_info['tickers']
                     }
                 })
@@ -804,6 +881,30 @@ class AutoTestSystem:
                     
                     print(f"  {model_id}: {perf['total_return']*100:+.2f}% daily, "
                           f"{cumulative_return*100:+.2f}% cumulative, {perf['trades_executed']} trades")
+                    
+                    # CIRCUIT BREAKER: Don't wait for Saturday culling if a model is
+                    # hemorrhaging money. Cull immediately if cumulative loss exceeds threshold.
+                    circuit_breaker_loss = self.colosseum_config.get('circuit_breaker_loss', -0.10)
+                    circuit_breaker_sharpe = self.colosseum_config.get('circuit_breaker_sharpe', -1.5)
+                    
+                    if cumulative_return < circuit_breaker_loss:
+                        print(f"  !! CIRCUIT BREAKER: {model_id} cumulative loss "
+                              f"{cumulative_return*100:.1f}% exceeds {circuit_breaker_loss*100:.0f}% threshold - CULLING")
+                        self.lifecycle_manager.transition_state(
+                            model_id, ModelState.CULLED,
+                            f"Circuit breaker: {cumulative_return*100:.1f}% cumulative loss"
+                        )
+                    else:
+                        # Also check Sharpe if we have enough data
+                        perf_data = self.lifecycle_manager.get_model_performance(model_id)
+                        if perf_data and perf_data['trading_days'] >= 5:
+                            if perf_data['sharpe_ratio'] < circuit_breaker_sharpe:
+                                print(f"  !! CIRCUIT BREAKER: {model_id} Sharpe "
+                                      f"{perf_data['sharpe_ratio']:.2f} below {circuit_breaker_sharpe} - CULLING")
+                                self.lifecycle_manager.transition_state(
+                                    model_id, ModelState.CULLED,
+                                    f"Circuit breaker: Sharpe {perf_data['sharpe_ratio']:.2f}"
+                                )
                 else:
                     print(f"  {model_id}: Trading failed - {result.get('error')}")
                     

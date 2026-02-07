@@ -47,6 +47,18 @@ class FeatureEngineer:
         tech_cols = [col for col in df.columns if col not in ['date', 'tic', 'open', 'high', 'low', 'close', 'volume']]
         df[tech_cols] = df[tech_cols].ffill().bfill().fillna(0)
         
+        # Capture raw stats BEFORE normalization so they can be used for
+        # consistent z-score normalization during live inference.
+        # Previously these were captured after normalization, making them
+        # useless (~0 mean, ~1 std) for normalizing raw live data.
+        self._raw_indicator_stats = {}
+        for col in tech_cols:
+            if col in df.columns:
+                self._raw_indicator_stats[col] = {
+                    'mean': float(df[col].mean()),
+                    'std': float(df[col].std())
+                }
+        
         # Normalize technical indicators to roughly -1 to 1 range for better ML training
         for col in tech_cols:
             if col in df.columns:
@@ -121,28 +133,36 @@ class FeatureEngineer:
         
         return df
     
-    def get_indicator_stats(self, df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+    def get_indicator_stats(self, df: pd.DataFrame = None) -> Dict[str, Dict[str, float]]:
         """
-        Get mean and std for each technical indicator from the processed data.
-        These stats are needed for consistent normalization during inference.
+        Get mean and std for each technical indicator from BEFORE normalization.
+        These stats are needed for consistent z-score normalization during live inference.
+        
+        Uses the raw stats captured during add_technical_indicators() before z-scoring.
+        If raw stats aren't available (e.g., add_technical_indicators wasn't called yet),
+        falls back to computing from the provided DataFrame.
         
         Args:
-            df: Processed DataFrame with technical indicators
+            df: Optional processed DataFrame (used as fallback only)
         
         Returns:
             Dict with 'means' and 'stds' for each indicator
         """
-        tech_cols = [col for col in df.columns if col not in ['date', 'tic', 'open', 'high', 'low', 'close', 'volume', 'turbulence']]
-        
         means = {}
         stds = {}
         
-        for col in tech_cols:
-            if col in df.columns:
-                # Get stats before normalization (raw values)
-                # Note: If already normalized, these will be ~0 and ~1
-                means[col] = float(df[col].mean())
-                stds[col] = float(df[col].std())
+        # Use raw pre-normalization stats if available
+        if hasattr(self, '_raw_indicator_stats') and self._raw_indicator_stats:
+            for col, stats in self._raw_indicator_stats.items():
+                means[col] = stats['mean']
+                stds[col] = stats['std']
+        elif df is not None:
+            # Fallback: compute from provided DataFrame (may be post-normalization)
+            tech_cols = [col for col in df.columns if col not in ['date', 'tic', 'open', 'high', 'low', 'close', 'volume', 'turbulence']]
+            for col in tech_cols:
+                if col in df.columns:
+                    means[col] = float(df[col].mean())
+                    stds[col] = float(df[col].std())
         
         return {'means': means, 'stds': stds}
     
