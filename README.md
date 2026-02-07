@@ -12,7 +12,7 @@ A continuous AI trading system that trains, validates, and paper trades reinforc
 - **Automated Backtesting**: Quality gates ensure only profitable models reach paper trading
 - **Live Paper Trading**: Real-time trading via Alpaca API with rate limiting
 - **Sector-Based Baskets**: Diversified training across tech, financials, healthcare, ETFs, and hedging strategies
-- **Streamlit Dashboard**: Monitor model performance, positions, and system status
+- **Terminal UI**: Monitor model performance, positions, and system status via text-based interface
 
 ## Quick Start
 
@@ -105,8 +105,10 @@ python scripts/autotest.py --mode train
 # Backtest existing models
 python scripts/autotest.py --mode backtest
 
-# Launch dashboard
-streamlit run app.py
+# Launch TUI (Terminal UI)
+python tui.py
+# or
+./run_tui.sh
 ```
 
 ### Systemd Service (Linux)
@@ -181,7 +183,8 @@ RLFI/
 │       └── live_paper_trading.py
 ├── scripts/
 │   └── autotest.py             # Main entry point
-├── app.py                      # Streamlit dashboard
+├── tui.py                      # Terminal UI dashboard
+├── run_tui.sh                  # Script to launch TUI
 ├── requirements.txt
 ├── setup.sh
 └── rlfi.service                # Systemd service file
