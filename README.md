@@ -1,5 +1,7 @@
 # RLFI - Reinforcement Learning Financial Intelligence
 
+> **⚠️ Project Status**: I do not plan to maintain this long term at this point. The best route for interested tinkerers is to fork the main repo and work on your own iteration rather than branching and attempting to push changes to this repo.
+
 A continuous AI trading system that trains, validates, and paper trades reinforcement learning models using a "Colosseum" approach - where models compete, evolve, and only the best survive.
 
 ## Features
