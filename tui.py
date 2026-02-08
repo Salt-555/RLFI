@@ -610,6 +610,19 @@ class ModelDetailsPanel(Static):
         with Collapsible(title="PAPER TRADING", collapsed=True, id="paper-collapsible"):
             yield Static("No paper trading data available", id="paper-content")
     
+    def on_collapsible_expanded(self, event: Collapsible.Expanded) -> None:
+        """Ensure only one collapsible is open at a time."""
+        collapsible_id = event.collapsible.id
+        
+        # Close the other collapsibles
+        for cid in ["grokking-collapsible", "backtest-collapsible", "paper-collapsible"]:
+            if cid != collapsible_id:
+                try:
+                    other = self.query_one(f"#{cid}", Collapsible)
+                    other.collapsed = True
+                except:
+                    pass
+    
     def load_model_details(self, model_id: str):
         """Load and display detailed information for a model."""
         self.current_model_id = model_id
@@ -903,7 +916,8 @@ class ModelsTab(Static):
         yield Static("[MODELS] ALL MODELS", classes="section-header")
         yield Static("", id="models-summary")
         yield Rule()
-        yield DataTable(id="models-table")
+        with ScrollableContainer(id="models-table-container", classes="scrollable-table"):
+            yield DataTable(id="models-table")
         yield Rule()
         yield ModelDetailsPanel(id="model-details")
     
@@ -1257,8 +1271,15 @@ class RLFIColosseumTUI(App):
         border: solid #ffaa00;
     }
     
+    #models-table-container {
+        height: auto;
+        max-height: 15;
+        background: #1a1a1a;
+        border: solid #996600;
+    }
+    
     DataTable {
-        height: 1fr;
+        height: auto;
         background: #1a1a1a;
     }
     
