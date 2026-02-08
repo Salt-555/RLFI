@@ -16,7 +16,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
     Header, Footer, Static, Button, DataTable, 
-    TabbedContent, TabPane, Label, Rule, Tree
+    TabbedContent, TabPane, Label, Rule, Tree, Collapsible
 )
 from textual.reactive import reactive
 from textual.timer import Timer
@@ -313,6 +313,121 @@ def get_next_events():
     return next_training, next_culling
 
 
+def get_model_details(model_id: str) -> dict:
+    """Get detailed information about a specific model including grokking, backtest, and paper trading data."""
+    details = {
+        'model_id': model_id,
+        'grokking': None,
+        'backtest': None,
+        'paper_trading': [],
+        'metadata': None
+    }
+    
+    # Try to load metadata from YAML files
+    dirs = ['autotest_models', 'models', 'champion_models']
+    for dir_path in dirs:
+        if not os.path.exists(dir_path):
+            continue
+        
+        metadata_file = os.path.join(dir_path, f"{model_id}_metadata.yaml")
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, 'r') as f:
+                    details['metadata'] = yaml.safe_load(f)
+                break
+            except:
+                continue
+    
+    # Try to load grokking data from selection JSON files
+    logs_dir = 'autotest_logs'
+    if os.path.exists(logs_dir):
+        try:
+            for filename in os.listdir(logs_dir):
+                if filename.startswith('model_selection_') and filename.endswith('.json'):
+                    filepath = os.path.join(logs_dir, filename)
+                    try:
+                        with open(filepath, 'r') as f:
+                            selection_data = json.load(f)
+                        
+                        for eval_data in selection_data.get('evaluations', []):
+                            if eval_data.get('model_id') == model_id:
+                                if 'grokking_details' in eval_data:
+                                    details['grokking'] = eval_data['grokking_details']
+                                # Also grab eval rewards for the hockey stick chart
+                                if 'eval_rewards' in eval_data:
+                                    details['eval_rewards'] = eval_data['eval_rewards']
+                                if 'eval_timesteps' in eval_data:
+                                    details['eval_timesteps'] = eval_data['eval_timesteps']
+                                break
+                        
+                        if details['grokking']:
+                            break
+                    except:
+                        continue
+        except:
+            pass
+    
+    # Load from database
+    db_path = 'autotest_strategies.db'
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            # Get backtest results
+            cursor.execute('''
+                SELECT sharpe_ratio, total_return, max_drawdown, win_rate, 
+                       sortino_ratio, calmar_ratio, volatility, final_value,
+                       ranking_score, rank_position
+                FROM backtest_results 
+                WHERE model_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            ''', (model_id,))
+            
+            row = cursor.fetchone()
+            if row:
+                details['backtest'] = {
+                    'sharpe_ratio': row[0],
+                    'total_return': row[1],
+                    'max_drawdown': row[2],
+                    'win_rate': row[3],
+                    'sortino_ratio': row[4],
+                    'calmar_ratio': row[5],
+                    'volatility': row[6],
+                    'final_value': row[7],
+                    'ranking_score': row[8],
+                    'rank_position': row[9]
+                }
+            
+            # Get paper trading daily log
+            cursor.execute('''
+                SELECT trading_date, portfolio_value, daily_return, trades_executed,
+                       transaction_costs, cash, total_stock_value
+                FROM paper_trading_daily_log
+                WHERE model_id = ?
+                ORDER BY trading_date ASC
+            ''', (model_id,))
+            
+            details['paper_trading'] = []
+            for row in cursor.fetchall():
+                details['paper_trading'].append({
+                    'date': row[0],
+                    'portfolio_value': row[1],
+                    'daily_return': row[2],
+                    'trades_executed': row[3],
+                    'transaction_costs': row[4],
+                    'cash': row[5],
+                    'stock_value': row[6]
+                })
+            
+            conn.close()
+        except Exception as e:
+            pass
+    
+    return details
+
+
 # ============================================================================
 # CUSTOM WIDGETS
 # ============================================================================
@@ -476,6 +591,311 @@ class DashboardTab(Static):
             champions_list.mount(Static("[dim]No champions yet[/dim]"))
 
 
+class ModelDetailsPanel(Static):
+    """Collapsible panel showing detailed model information with visualizations."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.current_model_id = None
+    
+    def compose(self) -> ComposeResult:
+        yield Static("[MODEL DETAILS] Select a model from the table above", id="details-header", classes="section-header")
+        
+        with Collapsible(title="GROKKING ANALYSIS", collapsed=True, id="grokking-collapsible"):
+            yield Static("No grokking data available", id="grokking-content")
+        
+        with Collapsible(title="BACKTEST RESULTS", collapsed=True, id="backtest-collapsible"):
+            yield Static("No backtest data available", id="backtest-content")
+        
+        with Collapsible(title="PAPER TRADING", collapsed=True, id="paper-collapsible"):
+            yield Static("No paper trading data available", id="paper-content")
+    
+    def load_model_details(self, model_id: str):
+        """Load and display detailed information for a model."""
+        self.current_model_id = model_id
+        
+        # Update header
+        header = self.query_one("#details-header", Static)
+        header.update(f"[MODEL DETAILS] {model_id}")
+        
+        # Load data
+        details = get_model_details(model_id)
+        
+        # Update Grokking Analysis
+        grokking_widget = self.query_one("#grokking-content", Static)
+        if details['grokking']:
+            g = details['grokking']
+            eval_rewards = details.get('eval_rewards', [])
+            content = self._format_grokking_content(g, eval_rewards)
+            grokking_widget.update(content)
+        else:
+            grokking_widget.update("[dim]No grokking analysis data available for this model[/dim]")
+        
+        # Update Backtest Results
+        backtest_widget = self.query_one("#backtest-content", Static)
+        if details['backtest']:
+            b = details['backtest']
+            content = self._format_backtest_content(b)
+            backtest_widget.update(content)
+        else:
+            backtest_widget.update("[dim]No backtest results available for this model[/dim]")
+        
+        # Update Paper Trading
+        paper_widget = self.query_one("#paper-content", Static)
+        if details['paper_trading']:
+            content = self._format_paper_trading_content(details['paper_trading'])
+            paper_widget.update(content)
+        else:
+            paper_widget.update("[dim]No paper trading data available for this model[/dim]")
+    
+    def _format_grokking_content(self, g: dict, eval_rewards: list = None) -> str:
+        """Format grokking analysis data as rich text with hockey stick chart."""
+        lines = []
+        
+        # Status indicator
+        has_grokked = g.get('has_grokked', False)
+        score = g.get('grokking_score', 0)
+        phase = g.get('phase', 'unknown')
+        
+        if has_grokked:
+            lines.append(f"[green bold][OK] GROKKED[/green bold] (Score: {score:.3f})")
+        else:
+            lines.append(f"[red bold][NO] NOT GROKKED[/red bold] (Score: {score:.3f})")
+        
+        lines.append(f"[dim]Phase: {phase} (Confidence: {g.get('phase_confidence', 0):.2f})[/dim]")
+        lines.append("")
+        
+        # HOCKEY STICK CHART - Visualize the grokking pattern
+        if eval_rewards and len(eval_rewards) >= 5:
+            lines.append("[bold cyan]HOCKEY STICK CHART (Eval Rewards Over Time)[/bold cyan]")
+            lines.append(self._create_hockey_stick_chart(eval_rewards, phase))
+            lines.append("")
+        
+        # Key metrics
+        lines.append("[bold]Weight Matrix Analysis:[/bold]")
+        rank_ratio = g.get('avg_effective_rank_ratio', 0)
+        rank_status = "[green]OK[/green]" if rank_ratio < 0.65 else "[red]BAD[/red]"
+        lines.append(f"  [{rank_status}] Effective Rank Ratio: {rank_ratio:.3f} (target < 0.65)")
+        
+        weight_norm = g.get('avg_weight_norm', 0)
+        lines.append(f"  [-] Average Weight Norm: {weight_norm:.2f}")
+        
+        norm_trend = g.get('weight_norm_trend', 0)
+        trend_icon = "DECR" if norm_trend < 0 else "INCR"
+        lines.append(f"  [{trend_icon}] Weight Norm Trend: {norm_trend:+.3f} (negative = simplifying)")
+        lines.append("")
+        
+        # Eval curve analysis
+        lines.append("[bold]Evaluation Performance:[/bold]")
+        stability = g.get('eval_stability', 0)
+        stability_pct = stability * 100
+        lines.append(f"  [-] Eval Stability: {stability_pct:.1f}%")
+        
+        improvement = g.get('eval_improvement_rate', 0)
+        imp_icon = "UP" if improvement > 0 else "DOWN"
+        lines.append(f"  [{imp_icon}] Late-Stage Improvement: {improvement:+.3f}")
+        
+        gap = g.get('generalization_gap', 0)
+        lines.append(f"  • Generalization Gap: {gap:.3f} (train - eval)")
+        lines.append("")
+        
+        # Reason
+        if 'reason' in g:
+            lines.append(f"[italic]{g['reason']}[/italic]")
+        
+        return "\n".join(lines)
+    
+    def _create_hockey_stick_chart(self, eval_rewards: list, phase: str) -> str:
+        """Create an ASCII hockey stick chart showing the grokking pattern."""
+        if not eval_rewards or len(eval_rewards) < 3:
+            return "[dim]Insufficient data for chart[/dim]"
+        
+        lines = []
+        rewards = list(eval_rewards)
+        n = len(rewards)
+        
+        # Normalize to 0-1 range for display
+        min_r = min(rewards)
+        max_r = max(rewards)
+        r_range = max_r - min_r if max_r != min_r else 1
+        
+        # Split into early, middle, late phases
+        third = n // 3
+        early_end = third
+        middle_end = 2 * third
+        
+        # Chart dimensions
+        chart_height = 8
+        chart_width = min(50, n)  # Max 50 data points displayed
+        
+        # Sample data points if too many
+        if n > chart_width:
+            step = n // chart_width
+            display_rewards = [rewards[i] for i in range(0, n, step)][:chart_width]
+        else:
+            display_rewards = rewards
+        
+        # Normalize display rewards
+        normalized = [(r - min_r) / r_range for r in display_rewards]
+        
+        # Build chart
+        lines.append("")
+        lines.append(f"  [dim]Eval Performance (n={n} checkpoints)[/dim]")
+        lines.append("")
+        
+        # Y-axis labels and chart
+        for row in range(chart_height, -1, -1):
+            threshold = row / chart_height
+            
+            # Y-axis label
+            value_at_level = min_r + (r_range * row / chart_height)
+            label = f"{value_at_level:6.0f} │"
+            
+            # Chart bars
+            bar_line = ""
+            for i, norm_val in enumerate(normalized):
+                # Color code by phase
+                pos = i / len(normalized)
+                if pos < 0.33:
+                    color = "dim"  # Early phase
+                elif pos < 0.67:
+                    color = "yellow"  # Middle phase  
+                else:
+                    color = "green" if phase in ['post_grok', 'grokking', 'improving'] else "red"
+                
+                if norm_val >= threshold:
+                    bar_line += f"[{color}]█[/{color}]"
+                else:
+                    bar_line += " "
+            
+            lines.append(f"  {label}{bar_line}")
+        
+        # X-axis
+        lines.append(f"       └{'─' * len(display_rewards)}")
+        lines.append(f"        [dim]Early[/dim]{' ' * (len(display_rewards)//3 - 5)}[yellow]Middle[/yellow]{' ' * (len(display_rewards)//3 - 6)}[bold]Late[/bold]")
+        
+        # Phase indicator
+        phase_emoji = {
+            'post_grok': 'POST-GROK (Sharp Late Improvement)',
+            'grokking': 'GROKKING (Active Improvement)', 
+            'improving': 'IMPROVING (Steady Progress)',
+            'pre_grok': 'PRE-GROK (Flat, Needs More Training)',
+            'memorizing': 'MEMORIZING (Stuck/Declining)'
+        }.get(phase, f'{phase.upper()}')
+        
+        lines.append("")
+        lines.append(f"  Pattern: {phase_emoji}")
+        
+        return "\n".join(lines)
+    
+    def _format_backtest_content(self, b: dict) -> str:
+        """Format backtest results as rich text."""
+        lines = []
+        
+        # Key metrics
+        lines.append("[bold]Performance Metrics:[/bold]")
+        
+        sharpe = b.get('sharpe_ratio', 0)
+        sharpe_color = "green" if sharpe > 1.0 else "yellow" if sharpe > 0.5 else "red"
+        lines.append(f"  [{sharpe_color}]• Sharpe Ratio: {sharpe:.3f}[/{sharpe_color}]")
+        
+        total_ret = b.get('total_return', 0)
+        ret_color = "green" if total_ret > 0 else "red"
+        lines.append(f"  [{ret_color}]• Total Return: {total_ret*100:.2f}%[/{ret_color}]")
+        
+        max_dd = b.get('max_drawdown', 0)
+        dd_color = "green" if max_dd < 0.1 else "yellow" if max_dd < 0.2 else "red"
+        lines.append(f"  [{dd_color}]• Max Drawdown: {max_dd*100:.2f}%[/{dd_color}]")
+        
+        win_rate = b.get('win_rate', 0)
+        lines.append(f"  • Win Rate: {win_rate*100:.1f}%")
+        lines.append("")
+        
+        # Additional metrics
+        lines.append("[bold]Risk-Adjusted Metrics:[/bold]")
+        lines.append(f"  • Sortino Ratio: {b.get('sortino_ratio', 0):.3f}")
+        lines.append(f"  • Calmar Ratio: {b.get('calmar_ratio', 0):.3f}")
+        lines.append(f"  • Volatility: {b.get('volatility', 0)*100:.2f}%")
+        lines.append("")
+        
+        # Portfolio
+        lines.append("[bold]Portfolio:[/bold]")
+        lines.append(f"  • Final Value: ${b.get('final_value', 0):,.2f}")
+        
+        rank = b.get('rank_position')
+        if rank:
+            lines.append(f"  • Ranking: #{rank} (Score: {b.get('ranking_score', 0):.3f})")
+        
+        return "\n".join(lines)
+    
+    def _format_paper_trading_content(self, paper_data: list) -> str:
+        """Format paper trading data as rich text with simple ASCII chart."""
+        if not paper_data:
+            return "[dim]No paper trading data available[/dim]"
+        
+        lines = []
+        
+        # Summary stats
+        lines.append("[bold]Trading Summary:[/bold]")
+        days_traded = len(paper_data)
+        lines.append(f"  • Days Traded: {days_traded}")
+        
+        if days_traded > 0:
+            start_value = paper_data[0].get('portfolio_value', 0)
+            end_value = paper_data[-1].get('portfolio_value', 0)
+            total_return = ((end_value - start_value) / start_value * 100) if start_value > 0 else 0
+            
+            ret_color = "green" if total_return > 0 else "red"
+            lines.append(f"  [{ret_color}]• Total Return: {total_return:+.2f}%[/{ret_color}]")
+            lines.append(f"  • Start Value: ${start_value:,.2f}")
+            lines.append(f"  • Current Value: ${end_value:,.2f}")
+            
+            total_trades = sum(d.get('trades_executed', 0) for d in paper_data)
+            lines.append(f"  • Total Trades: {total_trades}")
+        
+        lines.append("")
+        
+        # Simple ASCII chart of portfolio value over time
+        if days_traded >= 5:
+            lines.append("[bold]Portfolio Value Trend:[/bold]")
+            values = [d.get('portfolio_value', 0) for d in paper_data]
+            min_val = min(values)
+            max_val = max(values)
+            val_range = max_val - min_val if max_val != min_val else 1
+            
+            # Show last 20 data points max
+            display_data = values[-20:] if len(values) > 20 else values
+            
+            chart_height = 10
+            for row in range(chart_height, -1, -1):
+                threshold = min_val + (val_range * row / chart_height)
+                line = "  "
+                for val in display_data:
+                    if val >= threshold:
+                        line += "█"
+                    else:
+                        line += " "
+                lines.append(line)
+            
+            lines.append(f"  ${min_val:,.0f}{' ' * (len(display_data) - len(f'{min_val:,.0f}') - len(f'{max_val:,.0f}'))}${max_val:,.0f}")
+        
+        # Recent trades
+        lines.append("")
+        lines.append("[bold]Recent Activity (Last 5 Days):[/bold]")
+        recent = paper_data[-5:] if len(paper_data) > 5 else paper_data
+        for day in reversed(recent):
+            date = day.get('date', 'Unknown')
+            ret = day.get('daily_return', 0) * 100
+            ret_str = f"{ret:+.2f}%"
+            ret_color = "green" if ret > 0 else "red" if ret < 0 else "white"
+            value = day.get('portfolio_value', 0)
+            trades = day.get('trades_executed', 0)
+            
+            lines.append(f"  {date}: [{ret_color}]{ret_str}[/{ret_color}] | Value: ${value:,.0f} | Trades: {trades}")
+        
+        return "\n".join(lines)
+
+
 class ModelsTab(Static):
     """Models browser tab content."""
     
@@ -484,9 +904,24 @@ class ModelsTab(Static):
         yield Static("", id="models-summary")
         yield Rule()
         yield DataTable(id="models-table")
+        yield Rule()
+        yield ModelDetailsPanel(id="model-details")
     
     def on_mount(self) -> None:
         self.refresh_data()
+    
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection to show model details."""
+        table = self.query_one("#models-table", DataTable)
+        row_key = event.row_key
+        
+        # Get the model_id from the first column of the selected row
+        if row_key:
+            row_data = table.get_row(row_key)
+            if row_data:
+                model_id = str(row_data[0])  # First column is model_id
+                details_panel = self.query_one("#model-details", ModelDetailsPanel)
+                details_panel.load_model_details(model_id)
     
     def refresh_data(self) -> None:
         models = get_all_models()
