@@ -18,7 +18,7 @@ A continuous AI trading system that trains, validates, and paper trades reinforc
 ## Requirements
 
 - Python 3.9+
-- ~2GB disk space (CPU-only PyTorch)
+- ~2GB disk space to start. Increases over time as models are trained and stored. (CPU-only PyTorch)
 - Alpaca account for paper trading (free)
 - Linux system with systemd (for daemon mode)
 
