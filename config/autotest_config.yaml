@@ -16,47 +16,55 @@ autotest:
       - sac  # 40% - Sample efficient, concentrated positions
     
     # Organized stock baskets by sector (round-robin selection for diversity)
+    # Each basket has 8-10 stocks for better diversification
+    # Target: 35-42 stocks per model for optimal data density (~1:40-1:50 ratio)
     stock_baskets:
-      tech_mega:
-        name: "Tech Megacaps"
-        tickers: ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
-      tech_semis:
-        name: "Semiconductors"
-        tickers: ["NVDA", "AMD", "INTC", "AVGO", "QCOM"]
-      tech_growth:
-        name: "Tech Growth"
-        tickers: ["TSLA", "NVDA", "AMD", "CRM", "NOW"]
-      financials:
-        name: "Financials"
-        tickers: ["JPM", "BAC", "WFC", "GS", "MS"]
+      tech_mega_large:
+        name: "Tech Megacaps Large"
+        tickers: ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "CRM", "ADBE"]
+      tech_semis_large:
+        name: "Semiconductors Large"
+        tickers: ["NVDA", "AMD", "INTC", "AVGO", "QCOM", "TXN", "MU", "LRCX", "KLAC", "MRVL"]
+      tech_software:
+        name: "Enterprise Software"
+        tickers: ["MSFT", "CRM", "NOW", "ADBE", "INTU", "SNOW", "PLTR", "PANW", "FTNT", "CRWD"]
+      financials_large:
+        name: "Financials Large"
+        tickers: ["JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "AXP", "USB", "PNC"]
+      healthcare_large:
+        name: "Healthcare Large"
+        tickers: ["JNJ", "UNH", "PFE", "ABBV", "MRK", "LLY", "TMO", "ABT", "DHR", "BMY"]
+      consumer_large:
+        name: "Consumer Large"
+        tickers: ["AMZN", "HD", "NKE", "MCD", "SBUX", "COST", "LOW", "TJX", "F", "GM"]
+      industrials:
+        name: "Industrials"
+        tickers: ["CAT", "GE", "HON", "UPS", "BA", "RTX", "LMT", "DE", "MMM", "UNP"]
+      energy_materials:
+        name: "Energy & Materials"
+        tickers: ["XOM", "CVX", "COP", "SLB", "EOG", "FCX", "NEM", "DOW", "APD", "LIN"]
+      communications:
+        name: "Communications"
+        tickers: ["GOOGL", "META", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "WBD"]
       etf_broad:
         name: "Broad ETFs"
-        tickers: ["SPY", "QQQ", "DIA", "IWM", "VTI"]
+        tickers: ["SPY", "QQQ", "DIA", "IWM", "VTI", "VOO", "IVV", "VEA", "VWO", "BND"]
       etf_sector:
         name: "Sector ETFs"
-        tickers: ["XLK", "XLF", "XLE", "XLV", "XLI"]
-      consumer:
-        name: "Consumer"
-        tickers: ["AMZN", "HD", "NKE", "SBUX", "MCD"]
-      healthcare:
-        name: "Healthcare"
-        tickers: ["JNJ", "UNH", "PFE", "ABBV", "MRK"]
-      # Counter-correlated / Hedging baskets
-      metals_equity_hedge:
-        name: "Metals vs S&P Hedge"
-        tickers: ["GLD", "SLV", "SPY", "GDX", "PPLT"]
-      commodities_mix:
-        name: "Commodities Mix"
-        tickers: ["GLD", "SLV", "USO", "UNG", "DBA"]
-      safe_haven:
-        name: "Safe Haven Assets"
-        tickers: ["GLD", "TLT", "VXX", "UUP", "SPY"]
-      risk_on_off:
-        name: "Risk On/Off"
-        tickers: ["SPY", "TLT", "GLD", "QQQ", "IEF"]
-      energy_hedge:
-        name: "Energy vs Market"
-        tickers: ["XLE", "USO", "SPY", "XOP", "VDE"]
+        tickers: ["XLK", "XLF", "XLE", "XLV", "XLI", "XLP", "XLY", "XLB", "XLU", "XLRE"]
+      # Hedging & Alternative baskets
+      metals_commodities:
+        name: "Metals & Commodities"
+        tickers: ["GLD", "SLV", "IAU", "PPLT", "GDX", "GDXJ", "USO", "UNG", "DBA", "WOOD"]
+      fixed_income:
+        name: "Fixed Income"
+        tickers: ["TLT", "IEF", "SHY", "LQD", "HYG", "TIP", "BND", "AGG", "VGIT", "VCLT"]
+      safe_haven_mix:
+        name: "Safe Haven Mix"
+        tickers: ["GLD", "TLT", "VXX", "UUP", "SPLV", "USMV", "PFF", "VNQ", "REM", "SHV"]
+      international:
+        name: "International Developed"
+        tickers: ["VEA", "IEFA", "VXUS", "VEU", "SPDW", "EFA", "IEMG", "VWO", "SCZ", "EFAV"]
     
     learning_rate_variations:
       - 0.0001

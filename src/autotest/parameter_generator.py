@@ -87,11 +87,11 @@ class ParameterGenerator:
         
         # Get stock baskets (organized by sector) or fall back to old format
         stock_baskets = self.training_config.get('stock_baskets', {})
+        ticker_combos = self.training_config.get('ticker_combinations', [["SPY", "QQQ"]])
         if stock_baskets:
             basket_keys = list(stock_baskets.keys())
         else:
             # Fallback to old ticker_combinations format
-            ticker_combos = self.training_config.get('ticker_combinations', [["SPY", "QQQ"]])
             basket_keys = None
         
         learning_rates = self.training_config['learning_rate_variations']
@@ -129,12 +129,24 @@ class ParameterGenerator:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M')
         
         for i in range(num_sets):
-            # Round-robin basket selection for sector diversity
+            # Randomly select 3-5 baskets for broader diversification
             if basket_keys:
-                basket_key = basket_keys[i % len(basket_keys)]
-                basket_info = stock_baskets[basket_key]
-                tickers = basket_info['tickers']
-                basket_name = basket_info['name']
+                num_baskets = random.randint(3, 5)
+                num_baskets = min(num_baskets, len(basket_keys))
+                selected_basket_keys = random.sample(basket_keys, num_baskets)
+                
+                # Combine tickers across selected baskets
+                tickers = []
+                basket_names = []
+                for basket_key in selected_basket_keys:
+                    basket_info = stock_baskets[basket_key]
+                    basket_names.append(basket_info['name'])
+                    tickers.extend(basket_info['tickers'])
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                tickers = [t for t in tickers if not (t in seen or seen.add(t))]
+                basket_name = ", ".join(basket_names)
             else:
                 tickers = ticker_combos[i % len(ticker_combos)]
                 basket_name = "legacy"

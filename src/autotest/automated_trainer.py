@@ -14,6 +14,7 @@ from src.agents.trainer import is_shutdown_requested
 
 from src.data.data_loader import DataLoader
 from src.data.feature_engineer import FeatureEngineer
+from src.data.walk_forward_validator import WalkForwardValidator
 from src.environment.trading_env import StockTradingEnv
 from src.agents.trainer import RLTrainer
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -44,6 +45,35 @@ class AutomatedTrainer:
         self.strategy_db = StrategyDatabase(db_path)
         
         self.training_results = []
+
+    def _load_metadata(self, metadata_path: str) -> Dict[str, Any]:
+        """Load metadata safely, repairing legacy YAML with numpy tags if needed."""
+        with open(metadata_path, 'r') as f:
+            try:
+                metadata = yaml.safe_load(f)
+            except yaml.YAMLError:
+                f.seek(0)
+                metadata = yaml.unsafe_load(f)
+                # Repair legacy metadata by re-saving sanitized content
+                with open(metadata_path, 'w') as out_f:
+                    yaml.safe_dump(self._to_builtin(metadata), out_f, default_flow_style=False)
+        return metadata or {}
+
+    def _to_builtin(self, obj: Any) -> Any:
+        """Convert numpy/pandas types to plain Python types for YAML serialization."""
+        if isinstance(obj, dict):
+            return {k: self._to_builtin(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple, set)):
+            return [self._to_builtin(v) for v in obj]
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.generic):
+            return obj.item()
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
     
     def train_model(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -128,21 +158,37 @@ class AutomatedTrainer:
                 use_turbulence=self.base_config['features']['use_turbulence']
             )
             df = feature_engineer.preprocess_data(df)
+
+            # Ensure tickers reflect actual data coverage (some tickers may be dropped)
+            tickers_used = sorted(df['tic'].unique().tolist())
+            if set(tickers_used) != set(tickers):
+                print(f"[{model_id}] Adjusted tickers due to data coverage: {tickers_used}")
+                tickers = tickers_used
+                params['tickers'] = tickers_used
             
-            # Split data - keep holdout period untouched for final validation
-            print(f"[{model_id}] Splitting data...")
-            holdout_days = self.base_config['data'].get('holdout_days', 0) if self.base_config['data'].get('holdout_enabled', False) else 0
-            train_df, val_df, test_df, holdout_df = data_loader.split_data(
-                df,
-                train_ratio=self.base_config['data']['train_ratio'],
-                val_ratio=self.base_config['data']['val_ratio'],
-                test_ratio=self.base_config['data']['test_ratio'],
-                holdout_days=holdout_days
+            # Split data using walk-forward validation (rolling windows from current date)
+            print(f"[{model_id}] Splitting data with walk-forward validation...")
+            
+            # Initialize walk-forward validator
+            validator = WalkForwardValidator(
+                train_window_days=1260,      # 5 years training
+                val_window_days=252,         # 1 year validation
+                test_window_days=126,        # 6 months testing
+                min_train_days=504,          # Minimum 2 years
+                expanding_window=True,       # Grow training window over time
             )
             
-            # Store holdout_df for final evaluation (never use during training/selection)
-            if not holdout_df.empty:
-                print(f"[{model_id}] Holdout period reserved for final validation: {len(holdout_df)} rows")
+            # Get optimal train/val/test split based on most recent data
+            train_df, val_df, test_df = validator.get_optimal_train_val_split(df)
+            
+            # Holdout for final evaluation (last 90 days, never touched during training)
+            all_dates = sorted(df['date'].unique())
+            if len(all_dates) > 90:
+                holdout_dates = all_dates[-90:]  # Last 90 days
+                holdout_df = df[df['date'].isin(holdout_dates)].copy()
+                print(f"[{model_id}] Holdout period reserved for final validation: {len(holdout_df)} rows (last 90 days)")
+            else:
+                holdout_df = pd.DataFrame()
             
             # Create training environment
             print(f"[{model_id}] Creating training environment...")
@@ -237,7 +283,7 @@ class AutomatedTrainer:
             # Save metadata with eval history
             metadata_path = os.path.join(self.models_dir, f"{model_id}_metadata.yaml")
             with open(metadata_path, 'w') as f:
-                yaml.dump({
+                metadata = {
                     'model_id': model_id,
                     'algorithm': algorithm,
                     'tickers': tickers,
@@ -251,7 +297,8 @@ class AutomatedTrainer:
                     'eval_stds': eval_stds,
                     'final_eval_reward': eval_rewards[-1] if eval_rewards else None,
                     'best_eval_reward': max(eval_rewards) if eval_rewards else None
-                }, f)
+                }
+                yaml.safe_dump(self._to_builtin(metadata), f, default_flow_style=False)
             
             end_time = datetime.now()
             training_time = (end_time - start_time).total_seconds()
@@ -402,8 +449,7 @@ class AutomatedTrainer:
             # Load eval history from metadata
             metadata_path = result.get('metadata_path')
             if metadata_path and os.path.exists(metadata_path):
-                with open(metadata_path, 'r') as f:
-                    metadata = yaml.safe_load(f)
+                metadata = self._load_metadata(metadata_path)
                 
                 eval_rewards = metadata.get('eval_rewards', [])
                 eval_timesteps = metadata.get('eval_timesteps', [])
@@ -449,7 +495,7 @@ class AutomatedTrainer:
                     metadata['grokking_attempted'] = True
                     
                     with open(metadata_path, 'w') as f:
-                        yaml.dump(metadata, f)
+                        yaml.safe_dump(self._to_builtin(metadata), f, default_flow_style=False)
                     
                     if loaded_model is None:
                         print(f"[{model_id}] WARNING: Model passed selection but grokking analysis was skipped due to load failure")
@@ -474,11 +520,10 @@ class AutomatedTrainer:
         for model_id in selected_ids:
             metadata_path = os.path.join(self.models_dir, f"{model_id}_metadata.yaml")
             if os.path.exists(metadata_path):
-                with open(metadata_path, 'r') as f:
-                    metadata = yaml.safe_load(f)
+                metadata = self._load_metadata(metadata_path)
                 metadata['selected_for_testing'] = True
                 with open(metadata_path, 'w') as f:
-                    yaml.dump(metadata, f)
+                    yaml.safe_dump(self._to_builtin(metadata), f, default_flow_style=False)
         
         return selected_ids
     

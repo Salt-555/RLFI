@@ -330,6 +330,31 @@ class ModelSelector:
     def save_results(self, filepath: str):
         """Save evaluation results to JSON."""
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+        def to_builtin(obj):
+            """Convert numpy/frozendict types to JSON-serializable Python types."""
+            try:
+                import numpy as _np
+            except Exception:
+                _np = None
+            
+            # Handle frozendict-like objects
+            if hasattr(obj, "items") and not isinstance(obj, dict):
+                try:
+                    obj = dict(obj)
+                except Exception:
+                    pass
+            
+            if isinstance(obj, dict):
+                return {k: to_builtin(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple, set)):
+                return [to_builtin(v) for v in obj]
+            if _np is not None:
+                if isinstance(obj, _np.ndarray):
+                    return obj.tolist()
+                if isinstance(obj, _np.generic):
+                    return obj.item()
+            return obj
         
         results = {
             "criteria": {
@@ -362,7 +387,7 @@ class ModelSelector:
         }
         
         with open(filepath, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(to_builtin(results), f, indent=2)
         
         print(f"Selection results saved to {filepath}")
     

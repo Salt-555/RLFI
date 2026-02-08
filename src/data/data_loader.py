@@ -11,6 +11,21 @@ class DataLoader:
         self.tickers = tickers
         self.start_date = start_date
         self.end_date = end_date
+
+    def _filter_complete_tickers(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Filter out tickers with incomplete date coverage."""
+        if df.empty:
+            return df
+        
+        date_counts = df.groupby('tic')['date'].nunique()
+        max_dates = date_counts.max()
+        complete_tickers = date_counts[date_counts == max_dates].index.tolist()
+        
+        if len(complete_tickers) < len(date_counts):
+            dropped = sorted(set(date_counts.index) - set(complete_tickers))
+            print(f"Warning: Dropping {len(dropped)} tickers with incomplete data: {dropped}")
+        
+        return df[df['tic'].isin(complete_tickers)].reset_index(drop=True)
         
     def download_data(self) -> pd.DataFrame:
         print(f"Downloading data for {len(self.tickers)} tickers from {self.start_date} to {self.end_date}")
@@ -47,6 +62,9 @@ class DataLoader:
         combined_df = pd.concat(data_frames, ignore_index=True)
         combined_df['date'] = pd.to_datetime(combined_df['date'])
         combined_df = combined_df.sort_values(['date', 'tic']).reset_index(drop=True)
+
+        # Ensure all tickers have complete date coverage
+        combined_df = self._filter_complete_tickers(combined_df)
         
         print(f"Downloaded {len(combined_df)} rows for {len(combined_df['tic'].unique())} tickers")
         return combined_df
@@ -61,7 +79,8 @@ class DataLoader:
             raise FileNotFoundError(f"Data file not found: {filepath}")
         df = pd.read_csv(filepath)
         df['date'] = pd.to_datetime(df['date'])
-        return df
+        # Ensure all tickers have complete date coverage
+        return self._filter_complete_tickers(df)
     
     def split_data(self, df: pd.DataFrame, train_ratio: float = 0.7,
                    val_ratio: float = 0.15, test_ratio: float = 0.15,

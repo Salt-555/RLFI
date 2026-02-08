@@ -5,12 +5,31 @@ import os
 import yaml
 from typing import Dict, Any
 from datetime import datetime
+import numpy as np
+import pandas as pd
 
 from src.agents.trainer import RLTrainer, is_shutdown_requested
 from src.environment.trading_env import StockTradingEnv
 from src.data.data_loader import DataLoader
 from src.data.feature_engineer import FeatureEngineer
 from stable_baselines3.common.vec_env import DummyVecEnv
+
+
+def _to_builtin(obj: Any) -> Any:
+    """Convert numpy/pandas types to plain Python types for YAML serialization."""
+    if isinstance(obj, dict):
+        return {k: _to_builtin(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_to_builtin(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return obj
 
 
 def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, Any],
@@ -212,7 +231,7 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
         }
         
         with open(metadata_path, 'w') as f:
-            yaml.dump(metadata, f)
+            yaml.safe_dump(_to_builtin(metadata), f, default_flow_style=False)
         
         end_time = datetime.now()
         training_time = (end_time - start_time).total_seconds()
