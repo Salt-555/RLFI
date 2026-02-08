@@ -109,7 +109,7 @@ def get_lifecycle_data():
 
 
 def get_all_models():
-    """Fetch all models with their lifecycle data and metrics."""
+    """Get all models from the database with their current state."""
     db_path = 'autotest_strategies.db'
     if not os.path.exists(db_path):
         return []
