@@ -139,9 +139,17 @@ python tui.py
 
 **TUI Features:**
 - **Dashboard**: Live daemon status, model counts, paper trading overview
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/d5080bfa-8043-4836-b91b-dff9c2bc868f" />
+
 - **Models**: Browse all models with state, algorithm, Sharpe, and returns
+<img width="2547" height="1385" alt="image" src="https://github.com/user-attachments/assets/70c81e2e-663e-43a9-bde4-eb4b7bbc2750" />
+
 - **Lineage**: View family trees and genetic evolution
+<img width="2547" height="1385" alt="image" src="https://github.com/user-attachments/assets/a5bbf558-9258-42e0-a8e4-f296b67240bd" />
+
 - **Trading**: Paper trading history and performance
+<img width="2547" height="1385" alt="image" src="https://github.com/user-attachments/assets/622a060e-ca4c-4289-9de2-8249552b7f62" />
+
 
 **TUI Key Bindings:**
 - `1-4`: Switch between tabs (Dashboard, Models, Lineage, Trading)
