@@ -103,15 +103,18 @@ class LivePaperTrader:
         # Training env limits each buy to portfolio_value * max_position_pct * action
         self.max_position_pct = model_metadata.get('max_position_pct', 0.3)
         
-        # State dimensions - must match training env: 1 + 2*stock_dim + 4 + indicators*stock_dim + 1
+        # State dimensions - must match training env: 1 + 2*stock_dim + 4 + momentum + day_of_week + indicators*stock_dim + 1
         self.stock_dim = len(tickers)
-        self.state_space = 1 + 2 * self.stock_dim + 4 + len(tech_indicators) * self.stock_dim + 1
+        self.state_space = 1 + 2 * self.stock_dim + 4 + 1 + 1 + len(tech_indicators) * self.stock_dim + 1
         
         # Track peak portfolio value for drawdown calculation (matches training env)
         self.peak_portfolio_value = initial_capital
         
         # Track price history for momentum calculation (matches training env)
         self.price_history = []
+        
+        # Track returns history for return-based momentum (matches training env)
+        self.returns_history = []
         
         # Track initial prices for per-stock normalization (matches trading_env._initial_prices)
         self._initial_prices = None
@@ -332,17 +335,37 @@ class LivePaperTrader:
             current_drawdown = (self.peak_portfolio_value - self.portfolio_value) / (self.peak_portfolio_value + 1e-6)
             state.append(current_drawdown)
             
-            # 5. Momentum feature: 5-day price momentum (average across stocks)
+            # 5. Momentum feature: average log return over last 5 days
             self.price_history.append(prices.copy())
             if len(self.price_history) > 10:
                 self.price_history.pop(0)
             
-            if len(self.price_history) >= 5:
-                old_prices = self.price_history[-5]
-                momentum = np.mean((prices - old_prices) / (old_prices + 1e-8))
+            # Track returns history for return-based momentum
+            if len(self.price_history) >= 2:
+                prev_prices = self.price_history[-2]
+                daily_returns = []
+                for i in range(self.stock_dim):
+                    if prev_prices[i] > 0:
+                        log_ret = np.log(prices[i] / prev_prices[i])
+                        daily_returns.append(log_ret)
+                    else:
+                        daily_returns.append(0.0)
+                self.returns_history.append(daily_returns)
+                if len(self.returns_history) > 10:
+                    self.returns_history.pop(0)
+            
+            if len(self.price_history) >= 5 and len(self.returns_history) >= 5:
+                recent_returns = self.returns_history[-5:]
+                momentum = np.mean([np.mean(r) for r in recent_returns])
                 state.append(np.clip(momentum, -1, 1))
             else:
                 state.append(0.0)
+            
+            # 6. Day of week feature (0=Monday, 6=Sunday, normalized to 0-1)
+            from datetime import datetime
+            current_date = datetime.now()
+            day_of_week = current_date.weekday() / 6.0
+            state.append(day_of_week)
             
             # 6. Technical indicators (already z-score normalized by FeatureEngineer)
             for indicator in self.tech_indicators:

@@ -39,9 +39,8 @@ class StockTradingEnv(gym.Env):
         self.data = self._prepare_data() if df is not None else None
         self.terminal = False
         
-        # State: cash + prices + holdings + position_ratio + portfolio_growth + drawdown + momentum + indicators + turbulence
-        # Added: 5-day momentum feature for trend awareness
-        self.state_dim = 1 + 2 * stock_dim + 4 + len(tech_indicator_list) * stock_dim + 1
+        # State: cash + log_returns (stock_dim) + holdings (stock_dim) + position_ratio + portfolio_return + drawdown + momentum + day_of_week + indicators + turbulence
+        self.state_dim = 1 + 2 * stock_dim + 4 + 1 + len(tech_indicator_list) * stock_dim + 1
         
         # Track price history for momentum calculation
         self.price_history = []
@@ -103,6 +102,7 @@ class StockTradingEnv(gym.Env):
         self.peak_portfolio_value = self.initial_amount
         self.trades_this_episode = 0
         self.price_history = []  # Reset price history
+        self.returns_history = []  # Reset returns history
         
         state = self._get_state()
         info = {}
@@ -290,11 +290,23 @@ class StockTradingEnv(gym.Env):
         current_drawdown = (self.peak_portfolio_value - self.portfolio_value) / (self.peak_portfolio_value + 1e-6)
         state.append(current_drawdown)
         
-        # Momentum feature: 5-day price momentum (average across stocks)
-        if len(self.price_history) >= 5:
-            old_prices = self.price_history[-5]
-            momentum = np.mean((self.stock_prices - old_prices) / (old_prices + 1e-8))
+        # Momentum feature: average log return over last 5 days
+        if len(self.price_history) >= 5 and len(self.returns_history) >= 5:
+            recent_returns = self.returns_history[-5:]  # Last 5 days of log returns
+            momentum = np.mean([np.mean(r) for r in recent_returns])  # Average across stocks and days
             state.append(np.clip(momentum, -1, 1))
+        else:
+            state.append(0.0)
+        
+        # Day of week feature (0=Monday, 6=Sunday, normalized to 0-1)
+        current_date_str = self._get_date(self.day)
+        if current_date_str and isinstance(current_date_str, str):
+            try:
+                current_date = pd.to_datetime(current_date_str)
+                day_of_week = current_date.weekday() / 6.0  # Normalize to 0-1
+                state.append(day_of_week)
+            except:
+                state.append(0.0)
         else:
             state.append(0.0)
         
