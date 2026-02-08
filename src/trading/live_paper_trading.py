@@ -298,14 +298,19 @@ class LivePaperTrader:
             # 1. Normalized cash (same as training)
             state.append(self.cash / self.initial_capital)
             
-            # 2. Normalized stock prices: each stock relative to its own initial price
-            #    Matches trading_env._get_state() normalization
-            if self._initial_prices is None:
-                self._initial_prices = prices.copy()
-            
-            for i in range(self.stock_dim):
-                ref = self._initial_prices[i] if self._initial_prices[i] > 0 else 100.0
-                state.append(np.clip(prices[i] / ref, 0, 10))
+            # 2. Log returns: stationary, scale-invariant features
+            #    Matches trading_env._get_state() log return calculation
+            if len(self.price_history) >= 2:
+                prev_prices = self.price_history[-2]  # Yesterday's prices
+                for i in range(self.stock_dim):
+                    if prev_prices[i] > 0:
+                        log_ret = np.log(prices[i] / prev_prices[i])
+                        state.append(np.clip(log_ret, -1, 1))
+                    else:
+                        state.append(0.0)
+            else:
+                # First call - no previous price yet
+                state.extend([0.0] * self.stock_dim)
             
             # 3. Normalized holdings: (shares * price) / (initial_amount * 0.1)
             #    Matches trading_env value-based normalization
