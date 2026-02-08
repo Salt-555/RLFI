@@ -118,11 +118,13 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
         df = feature_engineer.preprocess_data(df)
         
         # Split data
-        train_df, val_df, test_df = data_loader.split_data(
+        holdout_days = base_config['data'].get('holdout_days', 0) if base_config['data'].get('holdout_enabled', False) else 0
+        train_df, val_df, test_df, _ = data_loader.split_data(
             df,
             train_ratio=base_config['data']['train_ratio'],
             val_ratio=base_config['data']['val_ratio'],
-            test_ratio=base_config['data']['test_ratio']
+            test_ratio=base_config['data']['test_ratio'],
+            holdout_days=holdout_days
         )
         
         # Create environments - must match parent's training env exactly

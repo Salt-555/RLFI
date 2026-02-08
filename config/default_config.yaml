@@ -7,9 +7,17 @@ data:
     - NVDA
   start_date: "2018-01-01"
   end_date: "2024-12-31"
+  # Data split configuration for walk-forward validation
+  # Train: 70% of historical data (oldest)
+  # Val: 15% of historical data (middle) - used during training for early stopping
+  # Test: 15% of historical data (most recent) - FINAL EVALUATION ONLY, never used during model selection
   train_ratio: 0.7
   val_ratio: 0.15
   test_ratio: 0.15
+  # Holdout period for true out-of-sample testing (never touched during development)
+  # Models should NOT be selected based on this data - it's for final validation only
+  holdout_enabled: true
+  holdout_days: 90  # Keep last 90 days as untouched holdout set
 
 features:
   technical_indicators:

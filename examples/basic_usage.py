@@ -47,7 +47,8 @@ def main():
     )
     df = feature_engineer.preprocess_data(df)
     
-    train_df, val_df, test_df = data_loader.split_data(df, 0.7, 0.15, 0.15)
+    holdout_days = config['data'].get('holdout_days', 0) if config['data'].get('holdout_enabled', False) else 0
+    train_df, val_df, test_df, _ = data_loader.split_data(df, 0.7, 0.15, 0.15, holdout_days)
     
     print("\n2. Creating environment...")
     train_env = StockTradingEnv(

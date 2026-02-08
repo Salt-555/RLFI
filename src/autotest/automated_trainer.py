@@ -129,14 +129,20 @@ class AutomatedTrainer:
             )
             df = feature_engineer.preprocess_data(df)
             
-            # Split data
+            # Split data - keep holdout period untouched for final validation
             print(f"[{model_id}] Splitting data...")
-            train_df, val_df, test_df = data_loader.split_data(
+            holdout_days = self.base_config['data'].get('holdout_days', 0) if self.base_config['data'].get('holdout_enabled', False) else 0
+            train_df, val_df, test_df, holdout_df = data_loader.split_data(
                 df,
                 train_ratio=self.base_config['data']['train_ratio'],
                 val_ratio=self.base_config['data']['val_ratio'],
-                test_ratio=self.base_config['data']['test_ratio']
+                test_ratio=self.base_config['data']['test_ratio'],
+                holdout_days=holdout_days
             )
+            
+            # Store holdout_df for final evaluation (never use during training/selection)
+            if not holdout_df.empty:
+                print(f"[{model_id}] Holdout period reserved for final validation: {len(holdout_df)} rows")
             
             # Create training environment
             print(f"[{model_id}] Creating training environment...")

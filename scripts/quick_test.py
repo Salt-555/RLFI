@@ -66,11 +66,13 @@ feature_engineer = FeatureEngineer(
 df = feature_engineer.preprocess_data(df)
 
 print("\n3. Splitting data...")
-train_df, val_df, test_df = data_loader.split_data(
+holdout_days = config['data'].get('holdout_days', 0) if config['data'].get('holdout_enabled', False) else 0
+train_df, val_df, test_df, _ = data_loader.split_data(
     df,
     train_ratio=config['data']['train_ratio'],
     val_ratio=config['data']['val_ratio'],
-    test_ratio=config['data']['test_ratio']
+    test_ratio=config['data']['test_ratio'],
+    holdout_days=holdout_days
 )
 
 print("\n4. Creating environment...")

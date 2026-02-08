@@ -2,7 +2,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import os
 
 
@@ -63,26 +63,54 @@ class DataLoader:
         df['date'] = pd.to_datetime(df['date'])
         return df
     
-    def split_data(self, df: pd.DataFrame, train_ratio: float = 0.7, 
-                   val_ratio: float = 0.15, test_ratio: float = 0.15) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def split_data(self, df: pd.DataFrame, train_ratio: float = 0.7,
+                   val_ratio: float = 0.15, test_ratio: float = 0.15,
+                   holdout_days: int = 0):
+        """
+        Split data into train/val/test/holdout sets.
+        
+        Args:
+            df: DataFrame with stock data
+            train_ratio, val_ratio, test_ratio: Ratios for splitting remaining data after holdout
+            holdout_days: Number of days to reserve as untouched holdout set (final validation only)
+        
+        Returns:
+            Tuple of (train_df, val_df, test_df, holdout_df)
+            - holdout_df: Never touched during model selection/training (true out-of-sample)
+        """
         assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios must sum to 1.0"
         
         unique_dates = sorted(df['date'].unique())
         n_dates = len(unique_dates)
         
-        train_end_idx = int(n_dates * train_ratio)
-        val_end_idx = int(n_dates * (train_ratio + val_ratio))
+        # First, split off holdout period (most recent dates) if enabled
+        if holdout_days > 0:
+            holdout_start_idx = max(0, n_dates - holdout_days)
+            holdout_dates = unique_dates[holdout_start_idx:]
+            remaining_dates = unique_dates[:holdout_start_idx]
+            n_remaining = len(remaining_dates)
+        else:
+            holdout_dates = []
+            remaining_dates = unique_dates
+            n_remaining = n_dates
         
-        train_dates = unique_dates[:train_end_idx]
-        val_dates = unique_dates[train_end_idx:val_end_idx]
-        test_dates = unique_dates[val_end_idx:]
+        # Split remaining data into train/val/test
+        train_end_idx = int(n_remaining * train_ratio)
+        val_end_idx = int(n_remaining * (train_ratio + val_ratio))
+        
+        train_dates = remaining_dates[:train_end_idx]
+        val_dates = remaining_dates[train_end_idx:val_end_idx]
+        test_dates = remaining_dates[val_end_idx:]
         
         train_df = df[df['date'].isin(train_dates)].reset_index(drop=True)
         val_df = df[df['date'].isin(val_dates)].reset_index(drop=True)
         test_df = df[df['date'].isin(test_dates)].reset_index(drop=True)
+        holdout_df = df[df['date'].isin(holdout_dates)].reset_index(drop=True) if holdout_dates else pd.DataFrame()
         
         print(f"Train: {train_df['date'].min()} to {train_df['date'].max()} ({len(train_df)} rows)")
         print(f"Val: {val_df['date'].min()} to {val_df['date'].max()} ({len(val_df)} rows)")
         print(f"Test: {test_df['date'].min()} to {test_df['date'].max()} ({len(test_df)} rows)")
+        if holdout_days > 0 and not holdout_df.empty:
+            print(f"Holdout: {holdout_df['date'].min()} to {holdout_df['date'].max()} ({len(holdout_df)} rows) [FINAL VALIDATION ONLY]")
         
-        return train_df, val_df, test_df
+        return train_df, val_df, test_df, holdout_df
