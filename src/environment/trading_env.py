@@ -256,17 +256,21 @@ class StockTradingEnv(gym.Env):
     def _get_state(self) -> np.ndarray:
         state = [self.cash / self.initial_amount]
         
-        # Normalize stock prices: each stock relative to its own initial price
-        # so $200 and $20 stocks both start near 1.0. Falls back to absolute
-        # normalization by $100 if no initial prices tracked yet.
-        if not hasattr(self, '_initial_prices') or self._initial_prices is None:
-            self._initial_prices = self.stock_prices.copy()
-        
-        normalized_prices = []
-        for i in range(self.stock_dim):
-            ref = self._initial_prices[i] if self._initial_prices[i] > 0 else 100.0
-            normalized_prices.append(np.clip(self.stock_prices[i] / ref, 0, 10))
-        state.extend(normalized_prices)
+        # Log returns: stationary, scale-invariant features
+        # Calculate daily log returns from price history instead of trending price levels
+        if len(self.price_history) >= 2:
+            prev_prices = self.price_history[-2]  # Yesterday's prices
+            log_returns = []
+            for i in range(self.stock_dim):
+                if prev_prices[i] > 0:
+                    log_ret = np.log(self.stock_prices[i] / prev_prices[i])
+                    log_returns.append(np.clip(log_ret, -1, 1))  # Clip extreme moves
+                else:
+                    log_returns.append(0.0)
+        else:
+            # First day - no previous price, use zeros
+            log_returns = [0.0] * self.stock_dim
+        state.extend(log_returns)
         
         # Normalize holdings relative to a position-value basis instead of
         # a fixed share count. Holdings = (shares * price) / initial_amount
