@@ -202,10 +202,23 @@ def continue_training_model(model_spec: Dict[str, Any], base_config: Dict[str, A
         model_path = os.path.join(models_dir, f"{new_model_id}_{algorithm}.zip")
         trainer.save_model(model_path)
         
-        # Save indicator stats for inference (matches automated_trainer behavior)
-        indicator_stats = feature_engineer.get_indicator_stats(df)
+        # GENETIC INHERITANCE: Use parent's indicator stats for consistent normalization
+        # This ensures offspring see the same feature distribution as their parent,
+        # maintaining compatibility with inherited neural network weights.
+        parent_stats_path = parent_metadata.get('indicator_stats_path')
         indicator_stats_path = os.path.join(models_dir, f"{new_model_id}_indicator_stats.json")
-        feature_engineer.save_indicator_stats(indicator_stats, indicator_stats_path)
+        
+        if parent_stats_path and os.path.exists(parent_stats_path):
+            # Inherit parent's stats (preserves feature distribution continuity)
+            print(f"[{new_model_id}] Inheriting indicator stats from parent: {parent_stats_path}")
+            parent_stats = feature_engineer.load_indicator_stats(parent_stats_path)
+            feature_engineer.save_indicator_stats(parent_stats, indicator_stats_path)
+            indicator_stats = parent_stats
+        else:
+            # Fallback: compute from offspring's training window (for backwards compatibility)
+            print(f"[{new_model_id}] No parent stats found, computing from training data...")
+            indicator_stats = feature_engineer.get_indicator_stats(df)
+            feature_engineer.save_indicator_stats(indicator_stats, indicator_stats_path)
         
         # Save metadata - include tech_indicators so offspring inherit them
         metadata_path = os.path.join(models_dir, f"{new_model_id}_metadata.yaml")

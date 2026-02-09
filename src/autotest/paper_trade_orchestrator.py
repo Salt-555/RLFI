@@ -65,18 +65,21 @@ class PaperTradeOrchestrator:
             # Get model-specific tech indicators from metadata if available
             tech_indicators = model_info.get('tech_indicators')
             
-            # If not provided directly, try loading from model metadata file
-            if not tech_indicators:
-                metadata_path = model_info.get('metadata_path')
-                if not metadata_path:
-                    # Derive metadata path from model path
-                    # e.g. "autotest_models/20260126_0200_001_ppo.zip" -> "autotest_models/20260126_0200_001_metadata.yaml"
-                    base = model_path.rsplit('_', 1)[0]  # Remove "_ppo.zip" or "_sac.zip"
-                    metadata_path = f"{base}_metadata.yaml"
+            # Load metadata file - always needed for indicator stats path
+            metadata = None
+            metadata_path = model_info.get('metadata_path')
+            if not metadata_path:
+                # Derive metadata path from model path
+                # e.g. "autotest_models/20260126_0200_001_ppo.zip" -> "autotest_models/20260126_0200_001_metadata.yaml"
+                base = model_path.rsplit('_', 1)[0]  # Remove "_ppo.zip" or "_sac.zip"
+                metadata_path = f"{base}_metadata.yaml"
+            
+            if metadata_path and os.path.exists(metadata_path):
+                with open(metadata_path, 'r') as f:
+                    metadata = yaml.safe_load(f)
                 
-                if metadata_path and os.path.exists(metadata_path):
-                    with open(metadata_path, 'r') as f:
-                        metadata = yaml.safe_load(f)
+                # If tech_indicators not provided directly, get from metadata
+                if not tech_indicators:
                     tech_indicators = metadata.get('tech_indicators')
                     print(f"[{model_id}] Loaded {len(tech_indicators)} indicators from metadata")
             
@@ -111,6 +114,7 @@ class PaperTradeOrchestrator:
                 'algorithm': algorithm,
                 'params': params,
                 'tech_indicators': tech_indicators,
+                'indicator_stats_path': metadata.get('indicator_stats_path') if metadata else None,
                 'success': True
             }
             
@@ -157,10 +161,12 @@ class PaperTradeOrchestrator:
             tech_indicators = model_info.get('tech_indicators', self.base_config['features']['technical_indicators'])
             
             # Create metadata for LivePaperTrader
+            # Include indicator_stats_path for consistent normalization (CRITICAL)
             metadata = {
                 'tickers': tickers,
                 'tech_indicators': tech_indicators,
-                'state_space': None  # Will be calculated by LivePaperTrader
+                'state_space': None,  # Will be calculated by LivePaperTrader
+                'indicator_stats_path': model_info.get('indicator_stats_path')
             }
             
             # Initialize paper trader

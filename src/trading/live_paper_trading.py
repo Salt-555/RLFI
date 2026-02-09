@@ -94,10 +94,28 @@ class LivePaperTrader:
         self.stop_trading = False
         
         # Feature engineering - use same class as training for consistency
+        # CRITICAL: Load training statistics for consistent normalization
+        indicator_stats_path = model_metadata.get('indicator_stats_path')
+        external_stats = None
+        if indicator_stats_path and os.path.exists(indicator_stats_path):
+            try:
+                external_stats = FeatureEngineer.load_indicator_stats(indicator_stats_path)
+                print(f"Loaded training indicator stats from: {indicator_stats_path}")
+            except Exception as e:
+                print(f"Warning: Could not load indicator stats: {e}")
+                print("Falling back to computing stats from live data (distribution mismatch risk!)")
+        else:
+            print(f"Warning: No indicator stats found at {indicator_stats_path}")
+            print("Using live data statistics (models may perform differently than during backtest!)")
+        
         self.fe = FeatureEngineer(
             tech_indicator_list=tech_indicators,
-            use_turbulence=False  # Disable turbulence for live trading (needs 252 days history)
+            use_turbulence=True,  # Enable turbulence to match training
+            external_stats=external_stats  # Use training stats for consistent normalization
         )
+        
+        # Turbulence requires 252 days of historical data for covariance calculation
+        self.historical_data_days = 300  # Buffer above 252 minimum
         
         # Position sizing limit - must match training env's max_position_pct
         # Training env limits each buy to portfolio_value * max_position_pct * action
@@ -522,9 +540,10 @@ class LivePaperTrader:
             print(f"  Cash: ${account_info['cash']:,.2f}")
             print(f"  Portfolio Value: ${account_info['portfolio_value']:,.2f}")
         
-        # Get historical data for feature engineering (120 days for indicator lookback)
+        # Get historical data for feature engineering 
+        # (300 days for turbulence covariance calculation + indicator lookback)
         print("\nFetching historical data for technical indicators...")
-        historical_df = self.get_historical_data(days=120)
+        historical_df = self.get_historical_data(days=self.historical_data_days)
         
         if historical_df.empty:
             print("ERROR: Could not fetch historical data")

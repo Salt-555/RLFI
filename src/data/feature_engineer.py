@@ -7,9 +7,19 @@ import os
 
 
 class FeatureEngineer:
-    def __init__(self, tech_indicator_list: List[str], use_turbulence: bool = True):
+    def __init__(self, tech_indicator_list: List[str], use_turbulence: bool = True, 
+                 external_stats: Dict = None):
+        """
+        Args:
+            tech_indicator_list: List of technical indicators to calculate
+            use_turbulence: Whether to calculate turbulence index
+            external_stats: Optional dict with 'means' and 'stds' for z-score normalization.
+                          If provided, uses these instead of computing from data.
+                          CRITICAL for live trading to match training distribution.
+        """
         self.tech_indicator_list = tech_indicator_list
         self.use_turbulence = use_turbulence
+        self.external_stats = external_stats  # Pre-computed from training
         
     def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -60,10 +70,18 @@ class FeatureEngineer:
                 }
         
         # Normalize technical indicators to roughly -1 to 1 range for better ML training
+        # CRITICAL: Use external_stats (from training) if provided, otherwise compute from data
         for col in tech_cols:
             if col in df.columns:
-                col_std = df[col].std()
-                col_mean = df[col].mean()
+                if self.external_stats and col in self.external_stats.get('means', {}):
+                    # Use training statistics for consistent normalization
+                    col_mean = self.external_stats['means'][col]
+                    col_std = self.external_stats['stds'][col]
+                else:
+                    # Fallback: compute from current data (training only)
+                    col_mean = df[col].mean()
+                    col_std = df[col].std()
+                
                 if col_std > 0:
                     df[col] = (df[col] - col_mean) / (col_std + 1e-8)
                     # Clip extreme values

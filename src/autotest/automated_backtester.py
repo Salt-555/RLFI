@@ -103,9 +103,24 @@ class AutomatedBacktester:
             # was trained with, otherwise the state vector dimensions won't match
             tech_indicators = model_info.get('tech_indicators', self.base_config['features']['technical_indicators'])
             print(f"[{model_id}] Engineering features ({len(tech_indicators)} indicators)...")
+            
+            # CRITICAL: Load training statistics for consistent normalization
+            # Without this, backtest uses different feature distributions than training
+            indicator_stats_path = model_info.get('indicator_stats_path')
+            external_stats = None
+            if indicator_stats_path and os.path.exists(indicator_stats_path):
+                try:
+                    external_stats = FeatureEngineer.load_indicator_stats(indicator_stats_path)
+                    print(f"[{model_id}] Loaded training indicator stats for consistent normalization")
+                except Exception as e:
+                    print(f"[{model_id}] Warning: Could not load indicator stats: {e}")
+            else:
+                print(f"[{model_id}] Warning: No indicator stats found - backtest may use different normalization than training")
+            
             feature_engineer = FeatureEngineer(
                 tech_indicator_list=tech_indicators,
-                use_turbulence=self.base_config['features']['use_turbulence']
+                use_turbulence=self.base_config['features']['use_turbulence'],
+                external_stats=external_stats  # Use training stats for consistent normalization
             )
             df = feature_engineer.preprocess_data(df)
             
@@ -259,8 +274,9 @@ class AutomatedBacktester:
                     with open(metadata_path, 'r') as f:
                         metadata = yaml.safe_load(f)
                     if metadata.get('selected_for_testing', False):
-                        # Add tech_indicators from metadata to model_info
+                        # Add tech_indicators and indicator_stats_path from metadata
                         model_info['tech_indicators'] = metadata.get('tech_indicators')
+                        model_info['indicator_stats_path'] = metadata.get('indicator_stats_path')
                         models_to_test.append(model_info)
                 else:
                     # If no metadata, include model (backwards compatibility)
