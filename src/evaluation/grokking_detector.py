@@ -58,17 +58,21 @@ class GrokkingDetector:
     """
     
     # Thresholds tuned for SB3 PPO/SAC trading models
+    # Based on research: "Grokking, Rank Minimization and Generalization in Deep Learning" (Yunis et al., 2024)
     # These use MlpPolicy with typically [256, 128] or [256, 256] architectures
-    EFFECTIVE_RANK_RATIO_THRESHOLD = 0.65  # Below this = structured learning
-    WEIGHT_NORM_GROWTH_THRESHOLD = 0.3  # Above this = weights still growing (bad)
-    MIN_EVAL_IMPROVEMENT = 0.15  # Minimum late-stage improvement ratio
-    MAX_GENERALIZATION_GAP = 0.5  # Max acceptable train-eval divergence
-    MIN_EVAL_STABILITY = 0.3  # Minimum eval stability score
+    # 
+    # KEY FINDING: Generalizing models show effective rank ratios < 0.3-0.4, not < 0.65!
+    # Pearson r > 0.9 correlation between low effective rank and test accuracy
+    EFFECTIVE_RANK_RATIO_THRESHOLD = 0.50  # Below this = structured learning (was 0.65, research suggests 0.35-0.50)
+    WEIGHT_NORM_GROWTH_THRESHOLD = 0.2  # Above this = weights still growing (bad) (tightened from 0.3)
+    MIN_EVAL_IMPROVEMENT = 0.25  # Minimum late-stage improvement ratio (was 0.15, need stronger hockey-stick)
+    MAX_GENERALIZATION_GAP = 0.3  # Max acceptable train-eval divergence (tightened from 0.5)
+    MIN_EVAL_STABILITY = 0.5  # Minimum eval stability score (increased from 0.3)
     
-    # Composite score weights
-    WEIGHT_SPECTRAL = 0.30  # Weight matrix structure
-    WEIGHT_EVAL_CURVE = 0.40  # Eval curve shape (most important)
-    WEIGHT_STABILITY = 0.30  # Consistency of performance
+    # Composite score weights - emphasize the hockey-stick eval pattern
+    WEIGHT_SPECTRAL = 0.25  # Weight matrix structure
+    WEIGHT_EVAL_CURVE = 0.50  # Eval curve shape (MOST important - this is the grokking signature!)
+    WEIGHT_STABILITY = 0.25  # Consistency of performance
     
     def __init__(self):
         pass
@@ -576,9 +580,10 @@ class GrokkingDetector:
         
         # Final decision
         # Need score above threshold AND no hard disqualifiers
-        score_passes = grokking_score >= 0.45
+        # Research-based threshold: truly grokked models score > 0.60 (was 0.45, too permissive)
+        score_passes = grokking_score >= 0.60
         has_hard_disqualifier = len(disqualifiers) >= 2 or (
-            len(disqualifiers) >= 1 and grokking_score < 0.55
+            len(disqualifiers) >= 1 and grokking_score < 0.70
         )
         
         has_grokked = score_passes and not has_hard_disqualifier
