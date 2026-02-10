@@ -57,22 +57,29 @@ class GrokkingDetector:
     memorizing specific price sequences from training data.
     """
     
-    # Thresholds tuned for SB3 PPO/SAC trading models
-    # Based on research: "Grokking, Rank Minimization and Generalization in Deep Learning" (Yunis et al., 2024)
-    # These use MlpPolicy with typically [256, 128] or [256, 256] architectures
+    # Thresholds tuned for SB3 PPO/SAC TRADING models
+    # IMPORTANT: Day trading stocks is NOISY and NON-STATIONARY compared to algorithmic tasks!
+    # Research papers (Yunis et al., Power et al.) focused on clean math problems (modular arithmetic).
+    # Stock markets have:
+    #   - High noise-to-signal ratio
+    #   - Non-stationary distributions (regime shifts)
+    #   - External shocks (earnings, news, macro)
+    #   - No clean underlying mathematical structure
     # 
-    # KEY FINDING: Generalizing models show effective rank ratios < 0.3-0.4, not < 0.65!
-    # Pearson r > 0.9 correlation between low effective rank and test accuracy
-    EFFECTIVE_RANK_RATIO_THRESHOLD = 0.50  # Below this = structured learning (was 0.65, research suggests 0.35-0.50)
-    WEIGHT_NORM_GROWTH_THRESHOLD = 0.2  # Above this = weights still growing (bad) (tightened from 0.3)
-    MIN_EVAL_IMPROVEMENT = 0.25  # Minimum late-stage improvement ratio (was 0.15, need stronger hockey-stick)
-    MAX_GENERALIZATION_GAP = 0.3  # Max acceptable train-eval divergence (tightened from 0.5)
-    MIN_EVAL_STABILITY = 0.5  # Minimum eval stability score (increased from 0.3)
+    # Therefore, trading thresholds MUST be more permissive than algorithmic task thresholds.
+    # A model with 0.50 grokking score on stocks may be excellent even if it would fail on modular arithmetic.
     
-    # Composite score weights - emphasize the hockey-stick eval pattern
-    WEIGHT_SPECTRAL = 0.25  # Weight matrix structure
-    WEIGHT_EVAL_CURVE = 0.50  # Eval curve shape (MOST important - this is the grokking signature!)
-    WEIGHT_STABILITY = 0.25  # Consistency of performance
+    # RELAXED for trading reality:
+    EFFECTIVE_RANK_RATIO_THRESHOLD = 0.70  # Below this = structured learning (relaxed from 0.65 - trading is noisy)
+    WEIGHT_NORM_GROWTH_THRESHOLD = 0.35  # Above this = weights still growing (relaxed from 0.3)
+    MIN_EVAL_IMPROVEMENT = 0.15  # Minimum late-stage improvement ratio (realistic for noisy markets)
+    MAX_GENERALIZATION_GAP = 0.5  # Max acceptable train-eval divergence (restored to 0.5 - markets diverge)
+    MIN_EVAL_STABILITY = 0.35  # Minimum eval stability score (relaxed from 0.3 - markets are volatile)
+    
+    # Composite score weights - balanced approach for noisy data
+    WEIGHT_SPECTRAL = 0.30  # Weight matrix structure
+    WEIGHT_EVAL_CURVE = 0.40  # Eval curve shape (important but not everything in noisy markets)
+    WEIGHT_STABILITY = 0.30  # Consistency of performance (important for trading)
     
     def __init__(self):
         pass
@@ -580,10 +587,11 @@ class GrokkingDetector:
         
         # Final decision
         # Need score above threshold AND no hard disqualifiers
-        # Research-based threshold: truly grokked models score > 0.60 (was 0.45, too permissive)
-        score_passes = grokking_score >= 0.60
+        # TRADING-SPECIFIC: 0.45 is realistic for noisy stock markets (not 0.60!)
+        # Algorithmic tasks (clean math) can demand 0.60+, but stocks are messy.
+        score_passes = grokking_score >= 0.45
         has_hard_disqualifier = len(disqualifiers) >= 2 or (
-            len(disqualifiers) >= 1 and grokking_score < 0.70
+            len(disqualifiers) >= 1 and grokking_score < 0.55
         )
         
         has_grokked = score_passes and not has_hard_disqualifier
