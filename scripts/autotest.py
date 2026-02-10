@@ -713,6 +713,15 @@ class AutoTestSystem:
         
         for result in backtest_results:
             if not result['success']:
+                # Transition failed models to CULLED so they don't get stuck in TRAINING state
+                model_id = result['model_id']
+                error_msg = result.get('error', 'Unknown error')
+                self.lifecycle_manager.transition_state(
+                    model_id, 
+                    ModelState.CULLED,
+                    f"Backtest failed: {error_msg}"
+                )
+                print(f"  ✗ {model_id}: CULLED (backtest failed: {error_msg})")
                 continue
                 
             model_id = result['model_id']
@@ -942,14 +951,10 @@ class AutoTestSystem:
         
         # Clean culled model files (30 days)
         try:
-            cursor = self.lifecycle_manager.conn.cursor()
-            cutoff = (datetime.now() - timedelta(days=30)).isoformat()
-            cursor.execute('''
-                SELECT model_id, model_path FROM model_lifecycle
-                WHERE current_state = 'culled' AND paper_trading_ended_at < ?
-            ''', (cutoff,))
-            
-            for model_id, model_path in cursor.fetchall():
+            old_models = self.lifecycle_manager.get_old_culled_models(days=30)
+            for model in old_models:
+                model_path = model.get('model_path')
+                model_id = model.get('model_id')
                 if model_path and os.path.exists(model_path):
                     os.remove(model_path)
                     cleaned_count += 1
