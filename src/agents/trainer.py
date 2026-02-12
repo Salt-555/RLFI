@@ -225,7 +225,7 @@ class RLTrainer:
         print(f"Created {self.model_name.upper()} model")
         return self.model
     
-    def train(self, total_timesteps: int = None, eval_env=None):
+    def train(self, total_timesteps: int = None, eval_env=None, eval_callback: EvalCallback = None):
         if self.model is None:
             self.create_model()
         
@@ -253,16 +253,21 @@ class RLTrainer:
         callbacks.append(checkpoint_callback)
         
         if eval_env is not None:
-            eval_callback = EvalCallback(
-                eval_env,
-                n_eval_episodes=5,  # Run 5 episodes per eval for proper variance
-                best_model_save_path=f"./models/{self.model_name}_best",
-                log_path=f"./logs/{self.model_name}_eval",
-                eval_freq=self.config['training'].get('eval_freq', 10000),
-                deterministic=True,
-                render=False
-            )
-            callbacks.append(eval_callback)
+            if eval_callback is not None:
+                # Use provided custom eval callback
+                callbacks.append(eval_callback)
+            else:
+                # Use default eval callback
+                eval_callback = EvalCallback(
+                    eval_env,
+                    n_eval_episodes=5,  # Run 5 episodes per eval for proper variance
+                    best_model_save_path=f"./models/{self.model_name}_best",
+                    log_path=f"./logs/{self.model_name}_eval",
+                    eval_freq=self.config['training'].get('eval_freq', 10000),
+                    deterministic=True,
+                    render=False
+                )
+                callbacks.append(eval_callback)
         
         print(f"Training {self.model_name.upper()} for {total_timesteps} timesteps...")
         self.model.learn(

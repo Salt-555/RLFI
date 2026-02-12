@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class StateBuilder:
@@ -19,7 +21,8 @@ class StateBuilder:
         self,
         tickers: List[str],
         tech_indicators: List[str],
-        initial_amount: float = 100000
+        initial_amount: float = 100000,
+        use_market_context: bool = True
     ):
         """
         Initialize state builder.
@@ -28,11 +31,13 @@ class StateBuilder:
             tickers: List of stock tickers (must match training order)
             tech_indicators: List of technical indicators (must match training)
             initial_amount: Initial portfolio value for normalization
+            use_market_context: Whether to include VIX, FOMC, earnings features
         """
         self.tickers = tickers
         self.tech_indicators = tech_indicators
         self.initial_amount = initial_amount
         self.stock_dim = len(tickers)
+        self.use_market_context = use_market_context
         
         # Running statistics for technical indicators (for z-score normalization)
         # These should be computed from training data or loaded from saved stats
@@ -45,9 +50,19 @@ class StateBuilder:
         # Track price history for momentum calculation (matches training env)
         self.price_history = []
         
+        # Market context loader for live data
+        self.market_context_loader = None
+        if use_market_context:
+            try:
+                from data.market_context_loader import LiveMarketContext
+                self.market_context_loader = LiveMarketContext()
+            except ImportError:
+                print("Warning: Could not import LiveMarketContext")
+        
         # State dimension calculation (must match trading_env.py)
-        # cash + prices + holdings + position_ratio + portfolio_growth + drawdown + momentum + indicators + turbulence
-        self.state_dim = 1 + 2 * self.stock_dim + 4 + len(tech_indicators) * self.stock_dim + 1
+        # cash + prices + holdings + position_ratio + portfolio_growth + drawdown + momentum + indicators + turbulence + market_context
+        self.market_context_dim = 12 if use_market_context else 0
+        self.state_dim = 1 + 2 * self.stock_dim + 4 + len(tech_indicators) * self.stock_dim + 1 + self.market_context_dim
     
     def set_indicator_stats(self, means: Dict[str, float], stds: Dict[str, float]):
         """
@@ -81,7 +96,8 @@ class StateBuilder:
         stock_prices: Dict[str, float],
         stocks_owned: Dict[str, float],
         tech_indicator_values: Dict[str, Dict[str, float]],
-        turbulence: float = 0.0
+        turbulence: float = 0.0,
+        days_to_earnings: int = 999
     ) -> np.ndarray:
         """
         Build state vector matching training environment exactly.
@@ -93,6 +109,7 @@ class StateBuilder:
             stocks_owned: Dict of ticker -> shares owned
             tech_indicator_values: Dict of ticker -> {indicator: value}
             turbulence: Current turbulence index value
+            days_to_earnings: Days until next earnings (for stock-specific event risk)
         
         Returns:
             State vector matching training format
@@ -165,6 +182,45 @@ class StateBuilder:
         
         # 6. Turbulence (normalized)
         state.append(turbulence / 100)
+        
+        # 7. Market context features (VIX, FOMC, put/call, earnings)
+        if self.use_market_context and self.market_context_loader:
+            try:
+                context = self.market_context_loader.get_current_context()
+                
+                # VIX features
+                state.append(context.get('vix_close', 20.0) / 50.0)
+                state.append(context.get('vix3m_close', 22.0) / 50.0)
+                state.append(context.get('vix_spread', 2.0) / 10.0)
+                state.append(context.get('vix_ratio', 1.1))
+                state.append(context.get('vix_norm', 0.4))
+                
+                # Put/Call ratio
+                state.append(context.get('put_call_ratio', 1.0))
+                state.append(context.get('put_call_5dma', 1.0))
+                
+                # FOMC calendar
+                state.append(context.get('days_to_fomc', 30) / 30.0)
+                state.append(context.get('days_since_fomc', 30) / 30.0)
+                state.append(context.get('in_fomc_week', 0))
+                
+            except Exception as e:
+                # Fallback to defaults
+                state.extend([0.4, 0.44, 0.2, 1.1, 0.4])  # VIX
+                state.extend([1.0, 1.0])  # Put/Call
+                state.extend([1.0, 1.0, 0.0])  # FOMC
+        else:
+            # Market context disabled - use defaults
+            state.extend([0.4, 0.44, 0.2, 1.1, 0.4])  # VIX
+            state.extend([1.0, 1.0])  # Put/Call
+            state.extend([1.0, 1.0, 0.0])  # FOMC
+        
+        # 8. Earnings calendar (stock-specific)
+        # Normalize to 0-1 range (clipped at 90 days)
+        days_to_earnings_norm = min(abs(days_to_earnings), 90) / 90.0
+        days_since_earnings_norm = 1.0 if days_to_earnings >= 0 else min(abs(days_to_earnings), 90) / 90.0
+        state.append(days_to_earnings_norm)
+        state.append(days_since_earnings_norm)
         
         # Convert to numpy array
         state_array = np.array(state, dtype=np.float32)

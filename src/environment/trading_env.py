@@ -40,7 +40,10 @@ class StockTradingEnv(gym.Env):
         self.terminal = False
         
         # State: cash + log_returns (stock_dim) + holdings (stock_dim) + position_ratio + portfolio_return + drawdown + momentum + day_of_week + indicators + turbulence
-        self.state_dim = 1 + 2 * stock_dim + 4 + 1 + len(tech_indicator_list) * stock_dim + 1
+        # NEW: + market context features (VIX, FOMC, put/call, earnings)
+        # Market context: vix_close, vix3m_close, vix_spread, vix_ratio, vix_norm, put_call_ratio, put_call_5dma, days_to_fomc, days_since_fomc, in_fomc_week, days_to_earnings, days_since_earnings
+        self.market_context_dim = 12  # Number of market context features
+        self.state_dim = 1 + 2 * stock_dim + 4 + 1 + len(tech_indicator_list) * stock_dim + 1 + self.market_context_dim
         
         # Track price history for momentum calculation
         self.price_history = []
@@ -318,7 +321,78 @@ class StockTradingEnv(gym.Env):
         turbulence = self._get_turbulence(self.day)
         state.append(turbulence / 100)
         
+        # Add market context features (neutral, raw values)
+        market_context = self._get_market_context(self.day)
+        state.extend(market_context)
+        
         return np.array(state, dtype=np.float32)
+    
+    def _get_market_context(self, day: int) -> List[float]:
+        """
+        Get market context features for current day.
+        All values are raw and neutral - let RL learn what they mean.
+        """
+        day_data = self.data_by_day.get(day)
+        if day_data is None or day_data.empty:
+            # Return zeros if no data
+            return [0.0] * self.market_context_dim
+        
+        # Get first row (all rows have same market context)
+        row = day_data.iloc[0]
+        
+        context = []
+        
+        # VIX features (volatility term structure)
+        vix_close = row.get('vix_close', 20.0)
+        vix3m_close = row.get('vix3m_close', 22.0)
+        vix_spread = row.get('vix_spread', 2.0)
+        vix_ratio = row.get('vix_ratio', 1.1)
+        vix_norm = row.get('vix_norm', 0.4)
+        
+        context.extend([
+            float(vix_close) / 50.0,      # Normalized but not opinionated
+            float(vix3m_close) / 50.0,
+            float(vix_spread) / 10.0,     # Can be negative (backwardation)
+            float(vix_ratio),
+            float(vix_norm),
+        ])
+        
+        # Put/Call ratio (market sentiment)
+        put_call = row.get('put_call_ratio', 1.0)
+        put_call_5dma = row.get('put_call_5dma', 1.0)
+        
+        context.extend([
+            float(put_call),
+            float(put_call_5dma),
+        ])
+        
+        # FOMC calendar (policy event risk)
+        days_to_fomc = row.get('days_to_fomc', 30)
+        days_since_fomc = row.get('days_since_fomc', 30)
+        in_fomc_week = row.get('in_fomc_week', 0)
+        
+        context.extend([
+            float(days_to_fomc) / 30.0,      # Normalized to ~0-1 range
+            float(days_since_fomc) / 30.0,
+            float(in_fomc_week),
+        ])
+        
+        # Earnings calendar (stock-specific event risk)
+        # Note: This will be the same for all stocks on a given day
+        # The RL model learns which stocks are near earnings
+        days_to_earnings = row.get('days_to_earnings', 999)
+        days_since_earnings = row.get('days_since_earnings', 999)
+        
+        # Clip extreme values and normalize
+        days_to_earnings_norm = min(abs(float(days_to_earnings)), 90) / 90.0
+        days_since_earnings_norm = min(abs(float(days_since_earnings)), 90) / 90.0
+        
+        context.extend([
+            days_to_earnings_norm,
+            days_since_earnings_norm,
+        ])
+        
+        return context
     
     def _get_stock_prices(self, day: int) -> np.ndarray:
         day_data = self.data_by_day.get(day)

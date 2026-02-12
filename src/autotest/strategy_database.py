@@ -117,6 +117,10 @@ class StrategyDatabase:
                     initial_capital REAL,
                     training_timesteps INTEGER,
                     training_time_seconds REAL,
+                    grokking_phase TEXT,
+                    has_grokked BOOLEAN,
+                    grokking_score REAL,
+                    relative_improvement_pct REAL,
                     parameters_json TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -209,13 +213,21 @@ class StrategyDatabase:
             week_number = self.get_current_week_number()
             params = strategy_data['params']
             
+            # Extract grokking metrics if available
+            grokking_analysis = strategy_data.get('grokking_analysis', {})
+            grokking_phase = grokking_analysis.get('phase', 'unknown')
+            has_grokked = grokking_analysis.get('has_grokked', False)
+            grokking_score = grokking_analysis.get('score', 0.0)
+            relative_improvement_pct = grokking_analysis.get('relative_improvement_pct', 0.0)
+            
             cursor.execute('''
                 INSERT OR REPLACE INTO strategies (
                     model_id, week_number, run_date, algorithm, tickers,
                     learning_rate, n_steps, batch_size, gamma, clip_range,
                     ent_coef, weight_decay, reward_scaling, initial_capital, training_timesteps,
-                    training_time_seconds, parameters_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    training_time_seconds, grokking_phase, has_grokked, grokking_score,
+                    relative_improvement_pct, parameters_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 strategy_data['model_id'],
                 week_number,
@@ -233,6 +245,10 @@ class StrategyDatabase:
                 params.get('initial_capital'),
                 params.get('timesteps'),
                 strategy_data.get('training_time'),
+                grokking_phase,
+                has_grokked,
+                grokking_score,
+                relative_improvement_pct,
                 json.dumps(params)
             ))
             
@@ -447,6 +463,54 @@ class StrategyDatabase:
                 'week2': df.iloc[1].to_dict(),
                 'sharpe_improvement': df.iloc[1]['best_sharpe_ratio'] - df.iloc[0]['best_sharpe_ratio'],
                 'return_improvement': df.iloc[1]['best_total_return'] - df.iloc[0]['best_total_return']
+            }
+        
+        return self._execute_read(_read)
+    
+    def get_grokking_statistics(self, weeks_back: int = 12) -> Dict[str, Any]:
+        """Get grokking statistics for recent models"""
+        def _read(conn):
+            current_week = self.get_current_week_number()
+            
+            # Get grokking stats
+            query = '''
+                SELECT 
+                    COUNT(*) as total_models,
+                    SUM(CASE WHEN has_grokked = 1 THEN 1 ELSE 0 END) as grokked_count,
+                    AVG(CASE WHEN has_grokked = 1 THEN 1.0 ELSE 0 END) * 100 as grokking_percentage,
+                    AVG(relative_improvement_pct) as avg_improvement_pct,
+                    grokking_phase,
+                    COUNT(*) as phase_count
+                FROM strategies
+                WHERE week_number >= ?
+                GROUP BY grokking_phase
+            '''
+            
+            cursor = conn.cursor()
+            cursor.execute(query, [current_week - weeks_back])
+            phase_data = cursor.fetchall()
+            
+            # Get overall stats
+            cursor.execute('''
+                SELECT 
+                    COUNT(*) as total_models,
+                    SUM(CASE WHEN has_grokked = 1 THEN 1 ELSE 0 END) as grokked_count,
+                    AVG(CASE WHEN has_grokked = 1 THEN 1.0 ELSE 0 END) * 100 as grokking_percentage,
+                    AVG(relative_improvement_pct) as avg_improvement_pct
+                FROM strategies
+                WHERE week_number >= ?
+            ''', [current_week - weeks_back])
+            
+            overall = cursor.fetchone()
+            
+            return {
+                'total_models': overall[0] or 0,
+                'grokked_count': overall[1] or 0,
+                'grokking_percentage': round(overall[2] or 0, 2),
+                'avg_improvement_pct': round(overall[3] or 0, 2),
+                'phase_breakdown': [
+                    {'phase': row[3], 'count': row[4]} for row in phase_data
+                ] if phase_data else []
             }
         
         return self._execute_read(_read)

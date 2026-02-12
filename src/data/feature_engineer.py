@@ -1,14 +1,16 @@
 import pandas as pd
 import numpy as np
 from stockstats import StockDataFrame as Sdf
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
 import os
 
 
 class FeatureEngineer:
     def __init__(self, tech_indicator_list: List[str], use_turbulence: bool = True, 
-                 external_stats: Dict = None):
+                 external_stats: Dict = None,
+                 market_context_df: Optional[pd.DataFrame] = None,
+                 earnings_df: Optional[pd.DataFrame] = None):
         """
         Args:
             tech_indicator_list: List of technical indicators to calculate
@@ -16,10 +18,14 @@ class FeatureEngineer:
             external_stats: Optional dict with 'means' and 'stds' for z-score normalization.
                           If provided, uses these instead of computing from data.
                           CRITICAL for live trading to match training distribution.
+            market_context_df: Optional DataFrame with market-wide context features (VIX, FOMC, etc.)
+            earnings_df: Optional DataFrame with earnings calendar features
         """
         self.tech_indicator_list = tech_indicator_list
         self.use_turbulence = use_turbulence
         self.external_stats = external_stats  # Pre-computed from training
+        self.market_context_df = market_context_df
+        self.earnings_df = earnings_df
         
     def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -89,6 +95,72 @@ class FeatureEngineer:
         
         return df
     
+    def add_market_context(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add market-wide context features (VIX, FOMC, put/call ratio).
+        These are merged on date only (same for all tickers).
+        """
+        if self.market_context_df is None or self.market_context_df.empty:
+            print("Warning: No market context data available")
+            return df
+        
+        df = df.copy()
+        
+        # Ensure date columns are datetime
+        df['date'] = pd.to_datetime(df['date'])
+        context_df = self.market_context_df.copy()
+        context_df['date'] = pd.to_datetime(context_df['date'])
+        
+        # Select only the columns we want to merge
+        context_cols = ['date', 'vix_close', 'vix3m_close', 'vix_spread', 'vix_ratio', 
+                       'vix_norm', 'put_call_ratio', 'put_call_5dma', 
+                       'days_to_fomc', 'days_since_fomc', 'in_fomc_week']
+        
+        available_cols = [col for col in context_cols if col in context_df.columns]
+        context_df = context_df[available_cols]
+        
+        # Merge on date
+        df = df.merge(context_df, on='date', how='left')
+        
+        # Forward fill missing values (in case of missing dates)
+        for col in available_cols:
+            if col != 'date' and col in df.columns:
+                df[col] = df[col].ffill().bfill()
+        
+        print(f"Added market context features: {[c for c in available_cols if c != 'date']}")
+        return df
+    
+    def add_earnings_context(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add ticker-specific earnings calendar features.
+        """
+        if self.earnings_df is None or self.earnings_df.empty:
+            print("Warning: No earnings calendar data available")
+            return df
+        
+        df = df.copy()
+        
+        # Ensure date columns are datetime
+        df['date'] = pd.to_datetime(df['date'])
+        earnings_df = self.earnings_df.copy()
+        earnings_df['date'] = pd.to_datetime(earnings_df['date'])
+        
+        # Merge on both date and ticker
+        merge_cols = ['date', 'tic', 'days_to_earnings', 'days_since_earnings']
+        available_cols = [col for col in merge_cols if col in earnings_df.columns]
+        earnings_df = earnings_df[available_cols]
+        
+        df = df.merge(earnings_df, on=['date', 'tic'], how='left')
+        
+        # Fill missing values
+        if 'days_to_earnings' in df.columns:
+            df['days_to_earnings'] = df['days_to_earnings'].fillna(999)  # Far future = no known earnings
+        if 'days_since_earnings' in df.columns:
+            df['days_since_earnings'] = df['days_since_earnings'].fillna(999)
+        
+        print("Added earnings calendar features")
+        return df
+    
     def add_turbulence(self, df: pd.DataFrame) -> pd.DataFrame:
         if not self.use_turbulence:
             return df
@@ -145,6 +217,12 @@ class FeatureEngineer:
         if self.use_turbulence:
             print("Calculating turbulence index...")
             df = self.add_turbulence(df)
+        
+        # Add market context features
+        df = self.add_market_context(df)
+        
+        # Add earnings calendar features
+        df = self.add_earnings_context(df)
         
         print(f"Feature engineering complete. Shape: {df.shape}")
         print(f"Columns: {df.columns.tolist()}")

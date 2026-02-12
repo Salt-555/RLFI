@@ -120,7 +120,7 @@ class ParameterGenerator:
         # Indicator pool for random selection
         indicator_pool = [
             'macd', 'rsi_30', 'cci_30', 'dx_30', 'close_30_sma', 'close_60_sma',
-            'adx', 'boll_ub', 'boll_lb', 'atr', 'willr', 'rsi_14', 'cci_14',
+            'adx', 'boll_ub', 'boll_lb', 'atr', 'wr', 'rsi_14', 'cci_14',
             'dx_14', 'close_20_sma', 'close_50_sma', 'adxr'
         ]
         

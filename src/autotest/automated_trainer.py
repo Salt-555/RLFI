@@ -14,11 +14,14 @@ from src.agents.trainer import is_shutdown_requested
 
 from src.data.data_loader import DataLoader
 from src.data.feature_engineer import FeatureEngineer
+from src.data.market_context_loader import MarketContextLoader
 from src.data.walk_forward_validator import WalkForwardValidator
 from src.environment.trading_env import StockTradingEnv
 from src.agents.trainer import RLTrainer
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.callbacks import EvalCallback
 from src.autotest.strategy_database import StrategyDatabase
+import json
 
 
 class AutomatedTrainer:
@@ -149,15 +152,30 @@ class AutomatedTrainer:
                 df = data_loader.download_data()
                 data_loader.save_data(df, data_path)
             
-            # Feature engineering with model-specific indicators
+            # Load market context features (VIX, FOMC, earnings, put/call)
+            print(f"[{model_id}] Loading market context data...")
+            context_loader = MarketContextLoader(
+                start_date=self.base_config['data']['start_date'],
+                end_date=self.base_config['data']['end_date']
+            )
+            market_context_df, earnings_df = context_loader.load_all_context(tickers)
+            
+            # Feature engineering with model-specific indicators + market context
             print(f"[{model_id}] Engineering features...")
             tech_indicators = params.get('tech_indicators', self.base_config['features']['technical_indicators'])
-            print(f"[{model_id}] Using {len(tech_indicators)} indicators: {tech_indicators}")
+            print(f"[{model_id}] Using {len(tech_indicators)} technical indicators + market context")
             feature_engineer = FeatureEngineer(
                 tech_indicator_list=tech_indicators,
-                use_turbulence=self.base_config['features']['use_turbulence']
+                use_turbulence=self.base_config['features']['use_turbulence'],
+                market_context_df=market_context_df,
+                earnings_df=earnings_df
             )
             df = feature_engineer.preprocess_data(df)
+            
+            # Log market context features
+            context_cols = ['vix_close', 'vix_spread', 'days_to_fomc', 'days_to_earnings']
+            available_context = [c for c in context_cols if c in df.columns]
+            print(f"[{model_id}] Market context features: {available_context}")
 
             # Ensure tickers reflect actual data coverage (some tickers may be dropped)
             tickers_used = sorted(df['tic'].unique().tolist())
@@ -242,13 +260,55 @@ class AutomatedTrainer:
                         'net_arch': {'pi': pi_arch, 'vf': vf_arch}
                     }
             
-            # Train model
+            # Train model with proper eval tracking for grokking detection
             print(f"[{model_id}] Training {algorithm.upper()} model...")
             trainer = RLTrainer(train_env, model_config, model_name=algorithm)
             
             from stable_baselines3.common.monitor import Monitor
             eval_env = DummyVecEnv([lambda: Monitor(val_env)])
-            model = trainer.train(total_timesteps=params['timesteps'], eval_env=eval_env)
+            
+            # Setup custom eval callback to capture rewards for grokking detection
+            eval_rewards_history = []
+            eval_timesteps_history = []
+            eval_stds_history = []
+            
+            class GrokkingEvalCallback(EvalCallback):
+                """Custom callback to capture eval data for proper grokking detection"""
+                def __init__(self, eval_env, **kwargs):
+                    super().__init__(eval_env, **kwargs)
+                    self.eval_rewards = []
+                    self.eval_timesteps = []
+                    self.eval_stds = []
+                
+                def _on_step(self) -> bool:
+                    result = super()._on_step()
+                    # Capture eval results after each evaluation
+                    if hasattr(self, 'last_mean_reward') and self.last_mean_reward is not None:
+                        self.eval_rewards.append(float(self.last_mean_reward))
+                        self.eval_timesteps.append(int(self.num_timesteps))
+                        self.eval_stds.append(float(getattr(self, 'last_std_reward', 0.0)))
+                    return result
+            
+            # Create custom eval callback
+            custom_eval_callback = GrokkingEvalCallback(
+                eval_env,
+                best_model_save_path=f"./models/{algorithm}_best",
+                log_path=f"./logs/{algorithm}_eval",
+                eval_freq=params.get('eval_freq', 10000),
+                n_eval_episodes=5,
+                deterministic=True
+            )
+            
+            model = trainer.train(
+                total_timesteps=params['timesteps'], 
+                eval_env=eval_env,
+                eval_callback=custom_eval_callback
+            )
+            
+            # Capture eval history from custom callback
+            eval_rewards_history = custom_eval_callback.eval_rewards
+            eval_timesteps_history = custom_eval_callback.eval_timesteps
+            eval_stds_history = custom_eval_callback.eval_stds
             
             # Check if training was interrupted - don't save incomplete models
             if is_shutdown_requested():
@@ -280,7 +340,24 @@ class AutomatedTrainer:
                 except Exception as e:
                     print(f"[{model_id}] Warning: Could not load eval history: {e}")
             
-            # Save metadata with eval history
+            # Use captured eval data if available, otherwise fall back to file
+            if eval_rewards_history:
+                eval_rewards = eval_rewards_history
+                eval_timesteps = eval_timesteps_history
+                eval_stds = eval_stds_history
+                print(f"[{model_id}] Captured {len(eval_rewards)} eval checkpoints from training")
+            
+            # Run proper grokking analysis
+            print(f"[{model_id}] Running grokking analysis...")
+            grokking_result = self._analyze_grokking(
+                model_id=model_id,
+                eval_timesteps=eval_timesteps,
+                eval_rewards=eval_rewards,
+                eval_stds=eval_stds,
+                timesteps=params['timesteps']
+            )
+            
+            # Save metadata with eval history and grokking analysis
             metadata_path = os.path.join(self.models_dir, f"{model_id}_metadata.yaml")
             with open(metadata_path, 'w') as f:
                 metadata = {
@@ -296,7 +373,11 @@ class AutomatedTrainer:
                     'eval_timesteps': eval_timesteps,
                     'eval_stds': eval_stds,
                     'final_eval_reward': eval_rewards[-1] if eval_rewards else None,
-                    'best_eval_reward': max(eval_rewards) if eval_rewards else None
+                    'best_eval_reward': max(eval_rewards) if eval_rewards else None,
+                    'grokking_analysis': grokking_result,
+                    'has_grokked': grokking_result.get('has_grokked', False),
+                    'state_dimension': train_env.state_dim,
+                    'market_context_enabled': True
                 }
                 yaml.safe_dump(self._to_builtin(metadata), f, default_flow_style=False)
             
@@ -308,11 +389,12 @@ class AutomatedTrainer:
             result['metadata_path'] = metadata_path
             result['training_time'] = training_time
             
-            # Save to strategy database
+            # Save to strategy database with grokking metrics
             self.strategy_db.save_strategy({
                 'model_id': model_id,
                 'params': params,
-                'training_time': training_time
+                'training_time': training_time,
+                'grokking_analysis': metadata.get('grokking_analysis', {})
             })
             
             print(f"\n[{model_id}] ✓ Training complete in {training_time:.1f}s")
@@ -397,7 +479,28 @@ class AutomatedTrainer:
         print(f"Total Models: {len(parameter_sets)}")
         print(f"Successful: {successful}")
         print(f"Failed: {failed}")
-        print(f"Summary saved to: {summary_path}")
+        
+        # Get and display grokking statistics
+        print("\n" + "-"*80)
+        print("GROKKING STATISTICS")
+        print("-"*80)
+        try:
+            grok_stats = self.get_grokking_statistics()
+            if grok_stats['total_models'] > 0:
+                print(f"Models Analyzed: {grok_stats['total_models']}")
+                print(f"Grokking Rate: {grok_stats['grokking_percentage']:.1f}% ({grok_stats['grokked_count']}/{grok_stats['total_models']})")
+                print(f"Avg Improvement: {grok_stats['avg_improvement_pct']:.1f}%")
+                if grok_stats.get('phase_distribution'):
+                    print("Phase Distribution:")
+                    for phase, count in grok_stats['phase_distribution'].items():
+                        print(f"  {phase}: {count}")
+            else:
+                print("No grokking data available yet")
+        except Exception as e:
+            print(f"Could not retrieve grokking stats: {e}")
+        print("-"*80)
+        
+        print(f"\nSummary saved to: {summary_path}")
         print("="*80)
         
         self.training_results = results
@@ -549,3 +652,233 @@ class AutomatedTrainer:
             models_dir=self.models_dir,
             logs_dir=self.logs_dir
         )
+    
+    def _analyze_grokking(self, model_id: str, eval_timesteps: List[int], 
+                         eval_rewards: List[float], eval_stds: List[float],
+                         timesteps: int) -> Dict[str, Any]:
+        """
+        Analyze training run for genuine grokking - PHASE TRANSITION detection.
+        
+        Grokking is characterized by:
+        1. Hockey-stick eval curve (flat early, sharp improvement late)
+        2. Weight matrices developing structure (declining effective rank)
+        3. Generalization gap closing
+        
+        This can happen at ANY timestep count, though research shows it's rare before 500K.
+        """
+        
+        if len(eval_timesteps) < 3:
+            return {
+                'has_grokked': False,
+                'phase': 'insufficient_checkpoints',
+                'confidence': 0.0,
+                'evidence': 'Need at least 3 eval checkpoints to detect phase transitions',
+                'score': 0.0,
+                'training_duration': timesteps,
+                'relative_improvement_pct': 0.0,
+                'early_mean': 0.0,
+                'mid_mean': 0.0,
+                'late_mean': 0.0,
+                'recommendation': 'Train with more frequent evals'
+            }
+        
+        # Analyze eval curve for phase transition
+        rewards = np.array(eval_rewards, dtype=float)
+        n = len(rewards)
+        
+        # Handle edge cases with few checkpoints
+        if n == 3:
+            early_rewards = rewards[:1]
+            mid_rewards = rewards[1:2]
+            late_rewards = rewards[2:]
+        elif n == 4:
+            early_rewards = rewards[:1]
+            mid_rewards = rewards[1:3]
+            late_rewards = rewards[3:]
+        else:
+            # Split into thirds for better phase detection
+            third = n // 3
+            early_rewards = rewards[:third] if third > 0 else rewards[:1]
+            mid_rewards = rewards[third:2*third] if third > 0 else rewards[1:2]
+            late_rewards = rewards[2*third:] if third > 0 else rewards[2:]
+        
+        early_mean = np.mean(early_rewards)
+        mid_mean = np.mean(mid_rewards)
+        late_mean = np.mean(late_rewards)
+        
+        # Compute normalized trends
+        def compute_trend(values):
+            if len(values) < 2:
+                return 0.0
+            x = np.arange(len(values))
+            y = np.array(values)
+            # Linear regression
+            A = np.vstack([x, np.ones(len(x))]).T
+            m, c = np.linalg.lstsq(A, y, rcond=None)[0]
+            # Normalize by range
+            value_range = np.max(y) - np.min(y)
+            if value_range < 1e-6:
+                value_range = abs(np.mean(y)) + 1e-6
+            return m * len(values) / value_range
+        
+        early_trend = compute_trend(early_rewards)
+        mid_trend = compute_trend(mid_rewards)
+        late_trend = compute_trend(late_rewards)
+        
+        # Compute hockey-stick metrics
+        early_to_mid = (mid_mean - early_mean) / (abs(early_mean) + 1e-8)
+        mid_to_late = (late_mean - mid_mean) / (abs(mid_mean) + 1e-8)
+        
+        # GROKKING DETECTION LOGIC
+        # Classic grokking: flat/declining early, sharp improvement late
+        # Key: Must show SUDDEN transition, not steady improvement
+        
+        # Calculate relative changes
+        early_flat = abs(early_to_mid) < 0.3  # Early phase relatively flat
+        late_jump = mid_to_late > 1.0  # Late phase shows 100%+ improvement
+        total_improvement = (late_mean - early_mean) / (abs(early_mean) + 1e-8)
+        
+        # STRICT hockey stick: must be flat early AND sudden jump late
+        is_hockey_stick = early_flat and late_jump and total_improvement > 1.5
+        
+        # Grokking phase: sharp improvement but not full transition yet
+        is_grokking_phase = (mid_to_late > 0.6 and late_mean > mid_mean * 1.3 and 
+                            not early_flat and total_improvement > 0.8)
+        
+        # Declining/memorizing
+        is_declining = (early_mean > late_mean * 1.2) or (mid_mean < early_mean * 0.7)
+        
+        # Steady learning (no phase transition)
+        is_steady = abs(early_to_mid) > 0.1 and abs(mid_to_late) > 0.1 and abs(early_to_mid - mid_to_late) < 0.5
+        
+        # Determine phase
+        if is_hockey_stick:
+            phase = 'post_grok'
+            confidence = min(1.0, mid_to_late / 2.0)
+            evidence = f"Phase transition: flat early ({early_to_mid:.2f}), sudden jump ({mid_to_late:.2f}), {total_improvement:.1f}x total gain"
+        elif is_grokking_phase and not is_steady:
+            phase = 'grokking'
+            confidence = min(1.0, mid_to_late)
+            evidence = f"Transition occurring: {mid_to_late:.2f}x late improvement, {total_improvement:.1f}x total"
+        elif is_declining:
+            phase = 'memorizing'
+            confidence = 0.8
+            evidence = f"Declining: {early_mean:.1f} → {mid_mean:.1f} → {late_mean:.1f}"
+        else:
+            phase = 'learning'
+            confidence = 0.4 + (0.15 if late_mean > early_mean else 0)
+            evidence = f"Steady learning: {early_mean:.1f} → {mid_mean:.1f} → {late_mean:.1f}"
+        
+        # Score based on phase
+        if phase == 'post_grok':
+            base_score = 0.92
+        elif phase == 'grokking':
+            base_score = 0.72
+        elif phase == 'learning':
+            base_score = 0.32
+        else:
+            base_score = 0.08
+        
+        score = base_score * confidence
+        
+        # Adjust for final profitability
+        final_mean = np.mean(eval_rewards[-3:]) if len(eval_rewards) >= 3 else np.mean(eval_rewards)
+        if final_mean <= 0:
+            score *= 0.3
+            evidence += f". WARNING: Final performance negative ({final_mean:.2f})"
+        else:
+            evidence += f". Final performance: {final_mean:.2f}"
+        
+        # Adjust for timestep count (research shows grokking rare before 500K, but possible)
+        timestep_factor = min(1.0, timesteps / 500000)
+        if timesteps < 100000:
+            score *= 0.7  # Unlikely but possible
+            evidence += f". Note: Only {timesteps:,} steps (grokking typically 500K+)"
+        
+        # Final verdict
+        has_grokked = (phase in ['post_grok', 'grokking']) and score > 0.45 and final_mean > 0
+        
+        # Calculate relative improvement percentage (late vs early)
+        relative_improvement_pct = ((late_mean - early_mean) / (abs(early_mean) + 1e-8)) * 100
+        
+        return {
+            'has_grokked': has_grokked,
+            'phase': phase,
+            'confidence': round(score, 3),
+            'evidence': evidence,
+            'score': round(score, 3),
+            'training_duration': timesteps,
+            'final_eval_mean': round(float(final_mean), 2),
+            'num_checkpoints': len(eval_timesteps),
+            'relative_improvement_pct': round(float(relative_improvement_pct), 2),
+            'early_mean': round(float(early_mean), 2),
+            'mid_mean': round(float(mid_mean), 2),
+            'late_mean': round(float(late_mean), 2),
+            'trends': {
+                'early': round(float(early_trend), 3),
+                'mid': round(float(mid_trend), 3) if not np.isnan(mid_trend) else 0.0,
+                'late': round(float(late_trend), 3)
+            },
+            'phase_changes': {
+                'early_to_mid': round(float(early_to_mid), 3),
+                'mid_to_late': round(float(mid_to_late), 3)
+            },
+            'recommendation': 'Continue training' if phase in ['learning', 'grokking'] and timesteps < 500000 else 'Ready for validation' if has_grokked else 'Review hyperparameters'
+        }
+    
+    def get_grokking_statistics(self) -> Dict[str, Any]:
+        """
+        Get statistics on grokking patterns across all trained models.
+        
+        Returns:
+            Dict with grokking percentages and metrics
+        """
+        grokking_data = []
+        
+        # Load metadata from all saved models
+        import glob
+        metadata_files = glob.glob(os.path.join(self.models_dir, '*_metadata.yaml'))
+        
+        for metadata_path in metadata_files:
+            try:
+                metadata = self._load_metadata(metadata_path)
+                if 'grokking_analysis' in metadata:
+                    grokking_data.append({
+                        'model_id': metadata['model_id'],
+                        'has_grokked': metadata.get('has_grokked', False),
+                        'phase': metadata['grokking_analysis'].get('phase', 'unknown'),
+                        'relative_improvement_pct': metadata['grokking_analysis'].get('relative_improvement_pct', 0),
+                        'score': metadata['grokking_analysis'].get('score', 0),
+                        'timesteps': metadata['grokking_analysis'].get('training_duration', 0)
+                    })
+            except Exception as e:
+                print(f"Warning: Could not load metadata from {metadata_path}: {e}")
+                continue
+        
+        if not grokking_data:
+            return {
+                'total_models': 0,
+                'grokking_percentage': 0.0,
+                'avg_improvement_pct': 0.0,
+                'message': 'No grokking data available yet'
+            }
+        
+        total_models = len(grokking_data)
+        grokked_models = sum(1 for m in grokking_data if m['has_grokked'])
+        grokking_pct = (grokked_models / total_models) * 100
+        avg_improvement = np.mean([m['relative_improvement_pct'] for m in grokking_data])
+        
+        # Count by phase
+        phase_counts = {}
+        for m in grokking_data:
+            phase = m['phase']
+            phase_counts[phase] = phase_counts.get(phase, 0) + 1
+        
+        return {
+            'total_models': total_models,
+            'grokking_percentage': round(grokking_pct, 2),
+            'grokked_count': grokked_models,
+            'avg_improvement_pct': round(float(avg_improvement), 2),
+            'phase_distribution': phase_counts,
+            'models': grokking_data
+        }
