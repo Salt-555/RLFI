@@ -271,12 +271,23 @@ class AutomatedBacktester:
                 # Check metadata for selected_for_testing flag
                 metadata_path = model_info.get('metadata_path')
                 if metadata_path and os.path.exists(metadata_path):
-                    with open(metadata_path, 'r') as f:
-                        metadata = yaml.safe_load(f)
-                    if metadata.get('selected_for_testing', False):
-                        # Add tech_indicators and indicator_stats_path from metadata
-                        model_info['tech_indicators'] = metadata.get('tech_indicators')
-                        model_info['indicator_stats_path'] = metadata.get('indicator_stats_path')
+                    # Validate metadata file isn't corrupted (suspiciously large)
+                    file_size = os.path.getsize(metadata_path)
+                    if file_size > 1024 * 1024:  # Skip files larger than 1MB
+                        print(f"  Warning: Skipping corrupted metadata for {model_info.get('model_id', 'unknown')} (size: {file_size} bytes)")
+                        models_to_test.append(model_info)
+                        continue
+                    
+                    try:
+                        with open(metadata_path, 'r') as f:
+                            metadata = yaml.safe_load(f)
+                        if metadata.get('selected_for_testing', False):
+                            # Add tech_indicators and indicator_stats_path from metadata
+                            model_info['tech_indicators'] = metadata.get('tech_indicators')
+                            model_info['indicator_stats_path'] = metadata.get('indicator_stats_path')
+                            models_to_test.append(model_info)
+                    except Exception as e:
+                        print(f"  Warning: Could not load metadata for {model_info.get('model_id', 'unknown')}: {e}")
                         models_to_test.append(model_info)
                 else:
                     # If no metadata, include model (backwards compatibility)

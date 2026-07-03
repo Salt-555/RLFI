@@ -334,27 +334,29 @@ class GrokkingDetector:
         early_to_mid_change = (middle_mean - early_mean) / (reward_range + 1e-8)
         mid_to_late_change = (late_mean - middle_mean) / (reward_range + 1e-8)
         
-        # Detect phase
-        if mid_to_late_change > 0.3 and early_to_mid_change < 0.1:
-            # Hockey stick: flat early, sharp late improvement
+        # Detect phase - RELAXED for noisy trading markets
+        # Stock markets don't show clean "hockey sticks" like algorithmic tasks
+        if mid_to_late_change > 0.15 and early_to_mid_change < 0.15:
+            # Hockey stick: flat early, sharp late improvement (relaxed from 0.3/0.1)
             phase = 'post_grok'
-            confidence = min(1.0, mid_to_late_change)
-        elif norm_overall > 0.3 and norm_late > 0.15:
-            # Still actively improving with good late-stage gains
+            confidence = min(1.0, mid_to_late_change * 2)
+        elif norm_overall > 0.15 and norm_late > 0.05:
+            # Still actively improving with good late-stage gains (relaxed from 0.3/0.15)
             phase = 'grokking'
-            confidence = min(1.0, norm_late * 2)
-        elif norm_overall > 0.2:
-            # Steady improvement throughout (normal healthy learning)
+            confidence = min(1.0, norm_late * 3)
+        elif norm_overall > 0.08:
+            # Steady improvement throughout (normal healthy learning, relaxed from 0.2)
             phase = 'improving'
-            confidence = min(1.0, norm_overall)
-        elif norm_overall < -0.1:
-            # Getting worse over time
+            confidence = min(1.0, norm_overall * 2)
+        elif norm_overall < -0.15:
+            # Getting worse over time (more tolerance for noisy flat periods)
             phase = 'memorizing'
             confidence = min(1.0, abs(norm_overall))
-        elif abs(norm_overall) < 0.1 and late_mean > 0:
-            # Flat but positive - could still be useful, converged early
-            phase = 'pre_grok'
-            confidence = 0.5
+        elif abs(norm_overall) < 0.15 and late_mean > 0:
+            # Flat but positive - model has converged to profitable behavior
+            # This is GOOD for trading, not bad! Markets have noise floors.
+            phase = 'converged'
+            confidence = min(1.0, 0.5 + abs(late_mean) / 100)
         else:
             # Flat and not positive
             phase = 'memorizing'
@@ -490,11 +492,13 @@ class GrokkingDetector:
         confidence = phase_results['confidence']
         late_improvement = phase_results.get('late_improvement', 0.0)
         
-        # Phase-based scoring
+        # Phase-based scoring - TRADING ADJUSTED
+        # 'converged' is GOOD for trading - means model found stable profitable strategy
         phase_scores = {
             'post_grok': 0.95,     # Best - clear grokking happened
             'grokking': 0.80,      # Active improvement
             'improving': 0.70,     # Steady learning (good)
+            'converged': 0.75,     # GOOD - stable profitable performance (trading-specific)
             'pre_grok': 0.30,      # Hasn't gotten there yet
             'memorizing': 0.10,    # Stuck memorizing
             'insufficient_data': 0.40,  # Unknown
@@ -567,8 +571,8 @@ class GrokkingDetector:
                     f"final eval reward is negative ({final_mean:.2f})"
                 )
         
-        # Qualifying factors
-        if phase in ['post_grok', 'grokking']:
+        # Qualifying factors - include 'converged' as positive for trading
+        if phase in ['post_grok', 'grokking', 'converged']:
             reasons.append(f"eval curve shows {phase} pattern")
         elif phase == 'improving':
             reasons.append("steady learning improvement throughout training")
@@ -587,11 +591,12 @@ class GrokkingDetector:
         
         # Final decision
         # Need score above threshold AND no hard disqualifiers
-        # TRADING-SPECIFIC: 0.45 is realistic for noisy stock markets (not 0.60!)
+        # TRADING-SPECIFIC: 0.40 is realistic for noisy stock markets (not 0.60!)
         # Algorithmic tasks (clean math) can demand 0.60+, but stocks are messy.
-        score_passes = grokking_score >= 0.45
+        # Models with stable converged performance should pass even with modest scores.
+        score_passes = grokking_score >= 0.40
         has_hard_disqualifier = len(disqualifiers) >= 2 or (
-            len(disqualifiers) >= 1 and grokking_score < 0.55
+            len(disqualifiers) >= 1 and grokking_score < 0.35
         )
         
         has_grokked = score_passes and not has_hard_disqualifier

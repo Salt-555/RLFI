@@ -3,6 +3,7 @@ RLFI Colosseum TUI
 Terminal-based status monitoring for the AI Trading Colosseum
 Built with Textual framework
 """
+import asyncio
 import os
 import sys
 import subprocess
@@ -508,19 +509,19 @@ class DashboardTab(Static):
             yield Button("[CAT] VIEW LOGS", id="btn-logs")
     
     def on_mount(self) -> None:
-        self.refresh_data()
+        self.set_timer(0, self.refresh_data)
     
-    def refresh_data(self) -> None:
-        # Daemon status
-        daemon_running = get_daemon_status()
+    async def refresh_data(self) -> None:
+        # Daemon status -- runs in thread pool so it doesn't block rendering
+        daemon_running = await asyncio.to_thread(get_daemon_status)
         status_widget = self.query_one("#daemon-status", Static)
         if daemon_running:
             status_widget.update("[green]█ DAEMON RUNNING[/green]")
         else:
             status_widget.update("[red]█ DAEMON STOPPED[/red]")
         
-        # Lifecycle data
-        data = get_lifecycle_data()
+        # Lifecycle data -- SQLite I/O off the event loop
+        data = await asyncio.to_thread(get_lifecycle_data)
         
         if data is None:
             return
@@ -564,7 +565,7 @@ class DashboardTab(Static):
         else:
             recent_list.mount(Static("[dim]No models trained yet[/dim]"))
         
-        # Schedule
+        # Schedule (pure computation, no I/O)
         next_training, next_culling = get_next_events()
         now = datetime.now()
         training_delta = next_training - now
@@ -922,7 +923,7 @@ class ModelsTab(Static):
         yield ModelDetailsPanel(id="model-details")
     
     def on_mount(self) -> None:
-        self.refresh_data()
+        self.set_timer(0, self.refresh_data)
     
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle row selection to show model details."""
@@ -937,8 +938,8 @@ class ModelsTab(Static):
                 details_panel = self.query_one("#model-details", ModelDetailsPanel)
                 details_panel.load_model_details(model_id)
     
-    def refresh_data(self) -> None:
-        models = get_all_models()
+    async def refresh_data(self) -> None:
+        models = await asyncio.to_thread(get_all_models)
         
         # Summary
         total = len(models)
@@ -1007,10 +1008,10 @@ class LineageTab(Static):
         yield ScrollableContainer(Tree("Models", id="lineage-tree"), id="lineage-container")
     
     def on_mount(self) -> None:
-        self.refresh_data()
+        self.set_timer(0, self.refresh_data)
     
-    def refresh_data(self) -> None:
-        models = get_all_models_with_lineage()
+    async def refresh_data(self) -> None:
+        models = await asyncio.to_thread(get_all_models_with_lineage)
         
         if not models:
             return
@@ -1097,10 +1098,10 @@ class TradingTab(Static):
         yield DataTable(id="trading-table")
     
     def on_mount(self) -> None:
-        self.refresh_data()
+        self.set_timer(0, self.refresh_data)
     
-    def refresh_data(self) -> None:
-        daily_data, agg_data = get_trading_data()
+    async def refresh_data(self) -> None:
+        daily_data, agg_data = await asyncio.to_thread(get_trading_data)
         
         if not daily_data and not agg_data:
             return
@@ -1338,44 +1339,44 @@ class RLFIColosseumTUI(App):
         
         yield Footer()
     
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-refresh":
-            self.action_refresh()
+            await self.action_refresh()
         elif event.button.id == "btn-daemon":
-            self.action_toggle_daemon()
+            await self.action_toggle_daemon()
         elif event.button.id == "btn-logs":
             self.show_logs()
     
-    def action_refresh(self) -> None:
+    async def action_refresh(self) -> None:
         """Refresh all data."""
         try:
-            self.query_one(DashboardTab).refresh_data()
+            await self.query_one(DashboardTab).refresh_data()
         except:
             pass
         try:
-            self.query_one(ModelsTab).refresh_data()
+            await self.query_one(ModelsTab).refresh_data()
         except:
             pass
         try:
-            self.query_one(LineageTab).refresh_data()
+            await self.query_one(LineageTab).refresh_data()
         except:
             pass
         try:
-            self.query_one(TradingTab).refresh_data()
+            await self.query_one(TradingTab).refresh_data()
         except:
             pass
         self.notify("Data refreshed")
     
-    def action_toggle_daemon(self) -> None:
+    async def action_toggle_daemon(self) -> None:
         """Toggle the RLFI daemon."""
-        daemon_running = get_daemon_status()
+        daemon_running = await asyncio.to_thread(get_daemon_status)
         if daemon_running:
-            os.system("sudo systemctl stop rlfi")
+            await asyncio.to_thread(lambda: os.system("sudo systemctl stop rlfi"))
             self.notify("Stopping daemon...")
         else:
-            os.system("sudo systemctl start rlfi")
+            await asyncio.to_thread(lambda: os.system("sudo systemctl start rlfi"))
             self.notify("Starting daemon...")
-        self.action_refresh()
+        await self.action_refresh()
     
     def action_tab_dashboard(self) -> None:
         self.query_one(TabbedContent).active = "tab-dashboard"

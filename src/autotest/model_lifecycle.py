@@ -46,7 +46,13 @@ class ModelLifecycleManager:
     
     def __init__(self, db_path: str = 'autotest_strategies.db'):
         self.db_path = db_path
-        self._initialize_lifecycle_tables()
+        print(f"[ModelLifecycle] Initializing with db_path: {db_path}")
+        try:
+            self._initialize_lifecycle_tables()
+            print("[ModelLifecycle] Tables initialized successfully")
+        except Exception as e:
+            print(f"[ModelLifecycle] ERROR during initialization: {e}")
+            raise
     
     def _get_connection(self):
         """Get a new database connection with proper settings for concurrency"""
@@ -60,6 +66,7 @@ class ModelLifecycleManager:
         conn = None
         try:
             conn = self._get_connection()
+            self._ensure_tables_exist(conn)
             result = operation(conn)
             conn.commit()
             return result
@@ -69,6 +76,40 @@ class ModelLifecycleManager:
                     conn.close()
                 except:
                     pass
+    
+    def _ensure_tables_exist(self, conn):
+        """Verify required tables exist, create if missing (defensive check)."""
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='model_lifecycle'
+        """)
+        if not cursor.fetchone():
+            print("[ModelLifecycle] WARNING: model_lifecycle table missing, creating now!")
+            cursor.execute('''
+                CREATE TABLE model_lifecycle (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id TEXT UNIQUE NOT NULL,
+                    current_state TEXT NOT NULL,
+                    state_entered_at TIMESTAMP NOT NULL,
+                    training_completed_at TIMESTAMP,
+                    validation_completed_at TIMESTAMP,
+                    paper_trading_started_at TIMESTAMP,
+                    paper_trading_ended_at TIMESTAMP,
+                    final_outcome TEXT,
+                    backtest_expected_return REAL,
+                    backtest_expected_sharpe REAL,
+                    model_path TEXT,
+                    metadata_path TEXT,
+                    tickers TEXT,
+                    algorithm TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_model_state ON model_lifecycle(current_state)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_model_lifecycle_model_id ON model_lifecycle(model_id)')
+            conn.commit()
     
     def _initialize_lifecycle_tables(self):
         """Create lifecycle tracking tables if they don't exist."""

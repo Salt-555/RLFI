@@ -283,10 +283,15 @@ class AutomatedTrainer:
                 def _on_step(self) -> bool:
                     result = super()._on_step()
                     # Capture eval results after each evaluation
-                    if hasattr(self, 'last_mean_reward') and self.last_mean_reward is not None:
-                        self.eval_rewards.append(float(self.last_mean_reward))
-                        self.eval_timesteps.append(int(self.num_timesteps))
-                        self.eval_stds.append(float(getattr(self, 'last_std_reward', 0.0)))
+                    # Only append when we have a valid reward (not -inf) and it's from an actual eval
+                    last_reward = getattr(self, 'last_mean_reward', None)
+                    if last_reward is not None and last_reward != float('-inf') and last_reward != float('inf'):
+                        # Track last captured timestep to avoid duplicates
+                        if not hasattr(self, '_last_captured_step') or self.num_timesteps != self._last_captured_step:
+                            self.eval_rewards.append(float(last_reward))
+                            self.eval_timesteps.append(int(self.num_timesteps))
+                            self.eval_stds.append(float(getattr(self, 'last_std_reward', 0.0)))
+                            self._last_captured_step = self.num_timesteps
                     return result
             
             # Create custom eval callback
@@ -357,6 +362,25 @@ class AutomatedTrainer:
                 timesteps=params['timesteps']
             )
             
+            # Sanitize eval_rewards to prevent corrupted metadata
+            # Filter out invalid values and limit size
+            valid_eval_rewards = []
+            valid_eval_timesteps = []
+            valid_eval_stds = []
+            for i, (reward, timestep, std) in enumerate(zip(eval_rewards, eval_timesteps, eval_stds)):
+                if reward is not None and reward != float('-inf') and reward != float('inf') and not (isinstance(reward, float) and np.isnan(reward)):
+                    valid_eval_rewards.append(float(reward))
+                    valid_eval_timesteps.append(int(timestep))
+                    valid_eval_stds.append(float(std))
+            
+            # Limit to reasonable size (max 1000 eval checkpoints)
+            if len(valid_eval_rewards) > 1000:
+                # Sample evenly spaced checkpoints
+                indices = np.linspace(0, len(valid_eval_rewards) - 1, 1000, dtype=int)
+                valid_eval_rewards = [valid_eval_rewards[i] for i in indices]
+                valid_eval_timesteps = [valid_eval_timesteps[i] for i in indices]
+                valid_eval_stds = [valid_eval_stds[i] for i in indices]
+            
             # Save metadata with eval history and grokking analysis
             metadata_path = os.path.join(self.models_dir, f"{model_id}_metadata.yaml")
             with open(metadata_path, 'w') as f:
@@ -369,11 +393,11 @@ class AutomatedTrainer:
                     'training_date': datetime.now().isoformat(),
                     'model_path': model_path,
                     'indicator_stats_path': indicator_stats_path,
-                    'eval_rewards': eval_rewards,
-                    'eval_timesteps': eval_timesteps,
-                    'eval_stds': eval_stds,
-                    'final_eval_reward': eval_rewards[-1] if eval_rewards else None,
-                    'best_eval_reward': max(eval_rewards) if eval_rewards else None,
+                    'eval_rewards': valid_eval_rewards,
+                    'eval_timesteps': valid_eval_timesteps,
+                    'eval_stds': valid_eval_stds,
+                    'final_eval_reward': valid_eval_rewards[-1] if valid_eval_rewards else None,
+                    'best_eval_reward': max(valid_eval_rewards) if valid_eval_rewards else None,
                     'grokking_analysis': grokking_result,
                     'has_grokked': grokking_result.get('has_grokked', False),
                     'state_dimension': train_env.state_dim,
